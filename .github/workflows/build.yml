@@ -1,0 +1,40 @@
+name: Build FiskLiveGTA
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore FiskLiveGTA.csproj
+
+      - name: Build
+        run: dotnet build FiskLiveGTA.csproj -c Release -o build_output
+
+      - name: Verify DLL exists
+        shell: pwsh
+        run: |
+          if (!(Test-Path "build_output/FiskLiveGTA.dll")) {
+            Write-Error "No se genero FiskLiveGTA.dll - revisa los errores de compilacion arriba"
+            exit 1
+          }
+          Write-Host "FiskLiveGTA.dll generado correctamente"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FiskLiveGTA
+          path: build_output/FiskLiveGTA.dll
