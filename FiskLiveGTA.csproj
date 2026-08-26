@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>Library</OutputType>
+    <AssemblyName>FiskLiveGTA</AssemblyName>
+    <RootNamespace>FiskLiveGTA</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Platforms>x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Esta DLL la sacas de tu carpeta de GTA V (donde esta ScriptHookVDotNet3.dll)
+         y la subis a la carpeta lib/ del repo. La necesitamos para poder compilar
+         contra la API de GTA (namespaces GTA, GTA.Native, GTA.Math). -->
+    <Reference Include="ScriptHookVDotNet3">
+      <HintPath>lib/ScriptHookVDotNet3.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
