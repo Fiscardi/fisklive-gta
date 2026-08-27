@@ -80,6 +80,12 @@ public class FiskLiveGTA : Script
 
     private void OnTick(object sender, EventArgs e)
     {
+        // No procesar comandos mientras el juego esta pausado (menu, alt-tab, etc.)
+        // Llamar a natives que modifican el mundo durante la pausa puede crashear
+        // el juego al despausar. Los comandos quedan en cola y se procesan apenas
+        // el juego vuelve a estar activo.
+        if (Game.IsPaused) return;
+
         while (_commandQueue.TryDequeue(out string cmd))
         {
             try
