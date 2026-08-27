@@ -198,8 +198,9 @@ public class FiskLiveGTA : Script
         Vector3 current = Game.Player.Character.Position;
         Vector3 target = current + new Vector3(rnd.Next(-500, 500), rnd.Next(-500, 500), 0);
 
-        float groundZ;
-        Function.Call<bool>(Hash.GET_GROUND_Z_FOR_3D_COORD, target.X, target.Y, 1000f, out groundZ, false);
+        OutputArgument groundZArg = new OutputArgument();
+        Function.Call<bool>(Hash.GET_GROUND_Z_FOR_3D_COORD, target.X, target.Y, 1000f, groundZArg, false);
+        float groundZ = groundZArg.GetResult<float>();
         if (groundZ <= 0f) groundZ = current.Z;
 
         Game.Player.Character.Position = new Vector3(target.X, target.Y, groundZ + 1f);
@@ -213,7 +214,7 @@ public class FiskLiveGTA : Script
 
         for (int i = 0; i < count; i++)
         {
-            Model model = new Model(PedHash.BallasogGmy);
+            Model model = new Model("g_m_y_ballasout_01");
             model.Request(500);
             if (!model.IsLoaded) continue;
 
