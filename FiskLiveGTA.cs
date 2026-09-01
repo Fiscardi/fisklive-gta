@@ -187,9 +187,9 @@ public class FiskLiveGTA : Script
             Game.Player.Character.Weapons.Give(weaponHash, 250, true, true);
             GTA.UI.Notification.PostTicker("~g~Arma entregada:~w~ " + weaponName, false);
         }
-        catch
+        catch (Exception ex)
         {
-            GTA.UI.Notification.PostTicker("~r~Arma no reconocida:~w~ " + weaponName, false);
+            GTA.UI.Notification.PostTicker("~r~Arma no reconocida:~w~ " + weaponName + " (" + ex.Message + ")", false);
         }
     }
 
