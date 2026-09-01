@@ -182,8 +182,9 @@ public class FiskLiveGTA : Script
     {
         try
         {
-            WeaponHash hash = (WeaponHash)Enum.Parse(typeof(WeaponHash), weaponName, true);
-            Game.Player.Character.Weapons.Give(hash, 250, true, true);
+            uint hash = (uint)Game.GenerateHash(weaponName.ToUpperInvariant());
+            WeaponHash weaponHash = (WeaponHash)hash;
+            Game.Player.Character.Weapons.Give(weaponHash, 250, true, true);
             GTA.UI.Notification.PostTicker("~g~Arma entregada:~w~ " + weaponName, false);
         }
         catch
