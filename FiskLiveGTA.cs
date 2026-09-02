@@ -158,8 +158,33 @@ public class FiskLiveGTA : Script
 
     // ---------- Acciones ----------
 
+    // Lista de vehiculos "divertidos" para cuando piden uno random, mezclando categorias
+    private static readonly string[] RandomVehicles = new string[]
+    {
+        // Autos deportivos / muscle
+        "adder", "zentorno", "t20", "osiris", "entityxf", "cheetah", "banshee", "sultanrs",
+        // Autos chicos / raros
+        "comet2", "brioso", "blista", "panto", "issi2", "duneloader",
+        // Motos y bicis
+        "bati801", "akuma", "sanchez", "bmx", "cruiser", "scorcher",
+        // Aviones y helicopteros
+        "velum", "mallard", "luxor", "buzzard", "maverick", "cargoplane",
+        // Barcos y lanchas
+        "jetmax", "speeder", "dinghy", "tug", "toro",
+        // Utilitarios/caoticos
+        "brutus", "trophytruck", "monster", "dune"
+    };
+
     private void SpawnVehicle(string modelName)
     {
+        if (string.IsNullOrWhiteSpace(modelName) ||
+            modelName.Equals("random", StringComparison.OrdinalIgnoreCase) ||
+            modelName.Equals("aleatorio", StringComparison.OrdinalIgnoreCase))
+        {
+            Random pick = new Random();
+            modelName = RandomVehicles[pick.Next(RandomVehicles.Length)];
+        }
+
         Model model = new Model(modelName);
         model.Request(1000);
         if (!model.IsLoaded)
@@ -169,10 +194,29 @@ public class FiskLiveGTA : Script
         }
 
         Vector3 pos = Game.Player.Character.Position + Game.Player.Character.ForwardVector * 6f;
-        Vehicle veh = World.CreateVehicle(model, pos);
+        // Aviones y helicopteros los ponemos un poco mas arriba para que no choquen contra el piso al aparecer
+        Vector3 spawnPos = pos;
+
+        Vehicle veh = World.CreateVehicle(model, spawnPos);
         if (veh != null)
         {
-            veh.PlaceOnGround();
+            // Solo "pegamos al piso" los vehiculos que van sobre ruedas.
+            // Aviones, helicopteros y barcos se ven raros o quedan trabados si forzamos esto.
+            VehicleClass vClass = veh.ClassType;
+            bool isGroundVehicle = vClass != VehicleClass.Planes
+                && vClass != VehicleClass.Helicopters
+                && vClass != VehicleClass.Boats;
+
+            if (isGroundVehicle)
+            {
+                veh.PlaceOnGround();
+            }
+            else
+            {
+                // Los levantamos un poco para que no aparezcan enterrados en el piso
+                veh.Position = spawnPos + new Vector3(0, 0, 3f);
+            }
+
             GTA.UI.Notification.PostTicker("~g~Vehiculo spawneado:~w~ " + modelName, false);
         }
         model.MarkAsNoLongerNeeded();
