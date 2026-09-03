@@ -284,12 +284,30 @@ public class FiskLiveGTA : Script
         model.MarkAsNoLongerNeeded();
     }
 
+    // Pool de armas variadas para cuando piden una random
+    private static readonly string[] RandomWeapons = new string[]
+    {
+        "WEAPON_PISTOL", "WEAPON_COMBATPISTOL", "WEAPON_MICROSMG", "WEAPON_SMG",
+        "WEAPON_ASSAULTRIFLE", "WEAPON_CARBINERIFLE", "WEAPON_PUMPSHOTGUN",
+        "WEAPON_SAWNOFFSHOTGUN", "WEAPON_MINIGUN", "WEAPON_RPG", "WEAPON_GRENADELAUNCHER",
+        "WEAPON_SNIPERRIFLE", "WEAPON_HEAVYSNIPER", "WEAPON_MOLOTOV", "WEAPON_GRENADE",
+        "WEAPON_STICKYBOMB", "WEAPON_KATANA", "WEAPON_BAT", "WEAPON_KNIFE",
+        "WEAPON_FIREEXTINGUISHER", "WEAPON_FLAREGUN", "WEAPON_RAILGUN"
+    };
+
     private void GiveWeapon(string weaponName)
     {
         try
         {
             string normalized = weaponName.Trim().ToUpperInvariant();
-            if (!normalized.StartsWith("WEAPON_"))
+
+            if (normalized == "RANDOM" || normalized == "ALEATORIO" ||
+                normalized == "WEAPON_RANDOM" || normalized == "WEAPON_ALEATORIO")
+            {
+                Random pick = new Random();
+                normalized = RandomWeapons[pick.Next(RandomWeapons.Length)];
+            }
+            else if (!normalized.StartsWith("WEAPON_"))
             {
                 normalized = "WEAPON_" + normalized;
             }
