@@ -18,7 +18,6 @@ public class FiskLiveGTA : Script
     private Thread _serverThread;
     private readonly ConcurrentQueue<string> _commandQueue = new ConcurrentQueue<string>();
     private volatile bool _running;
-    private Vehicle _milestoneVehicle; // vehiculo actual del sistema "reemplazar" (ej. cada X likes)
 
     public FiskLiveGTA()
     {
@@ -109,10 +108,6 @@ public class FiskLiveGTA : Script
         {
             case "spawn_vehicle":
                 SpawnVehicle(ExtractValue(json, "model") ?? "adder");
-                break;
-
-            case "spawn_vehicle_milestone":
-                SpawnMilestoneVehicle(ExtractValue(json, "model") ?? "random");
                 break;
 
             case "give_weapon":
@@ -227,91 +222,18 @@ public class FiskLiveGTA : Script
         model.MarkAsNoLongerNeeded();
     }
 
-    // Igual que SpawnVehicle, pero borra el vehiculo anterior de este sistema
-    // (si existe, esté donde esté, lo esten usando o no) y sube al jugador
-    // automaticamente al nuevo. Pensado para efectos tipo "cada 100 likes
-    // cambia el auto".
-    private void SpawnMilestoneVehicle(string modelName)
-    {
-        if (string.IsNullOrWhiteSpace(modelName) ||
-            modelName.Equals("random", StringComparison.OrdinalIgnoreCase) ||
-            modelName.Equals("aleatorio", StringComparison.OrdinalIgnoreCase))
-        {
-            Random pick = new Random();
-            modelName = RandomVehicles[pick.Next(RandomVehicles.Length)];
-        }
-
-        Model model = new Model(modelName);
-        model.Request(1000);
-        if (!model.IsLoaded)
-        {
-            GTA.UI.Notification.PostTicker("~r~No se pudo cargar el modelo:~w~ " + modelName, false);
-            return;
-        }
-
-        Ped player = Game.Player.Character;
-        Vector3 spawnPos = player.Position + player.ForwardVector * 6f;
-
-        // Borramos el vehiculo anterior de este sistema, si sigue existiendo
-        if (_milestoneVehicle != null && _milestoneVehicle.Exists())
-        {
-            _milestoneVehicle.Delete();
-        }
-
-        Vehicle veh = World.CreateVehicle(model, spawnPos);
-        if (veh != null)
-        {
-            VehicleClass vClass = veh.ClassType;
-            bool isGroundVehicle = vClass != VehicleClass.Planes
-                && vClass != VehicleClass.Helicopters
-                && vClass != VehicleClass.Boats;
-
-            if (isGroundVehicle)
-            {
-                veh.PlaceOnGround();
-            }
-            else
-            {
-                veh.Position = spawnPos + new Vector3(0, 0, 3f);
-            }
-
-            // Subimos al jugador directo al vehiculo nuevo (asiento del conductor)
-            Function.Call(Hash.SET_PED_INTO_VEHICLE, player, veh, -1);
-
-            _milestoneVehicle = veh;
-            GTA.UI.Notification.PostTicker("~g~Nuevo vehiculo:~w~ " + modelName, false);
-        }
-        model.MarkAsNoLongerNeeded();
-    }
-
     private void GiveWeapon(string weaponName)
     {
         try
         {
-            string normalized = weaponName.Trim().ToUpperInvariant();
-            if (!normalized.StartsWith("WEAPON_"))
-            {
-                normalized = "WEAPON_" + normalized;
-            }
-
-            uint hash = (uint)Game.GenerateHash(normalized);
-
-            // Validamos que el hash corresponda a un arma real antes de festejar.
-            // Sin esto, un nombre mal escrito "funciona" sin tirar error pero no entrega nada.
-            bool isValid = Function.Call<bool>(Hash.IS_WEAPON_VALID, hash);
-            if (!isValid)
-            {
-                GTA.UI.Notification.PostTicker("~r~Arma no reconocida:~w~ " + weaponName + " (probado como " + normalized + ")", false);
-                return;
-            }
-
+            uint hash = (uint)Game.GenerateHash(weaponName.ToUpperInvariant());
             WeaponHash weaponHash = (WeaponHash)hash;
             Game.Player.Character.Weapons.Give(weaponHash, 250, true, true);
-            GTA.UI.Notification.PostTicker("~g~Arma entregada:~w~ " + normalized, false);
+            GTA.UI.Notification.PostTicker("~g~Arma entregada:~w~ " + weaponName, false);
         }
         catch (Exception ex)
         {
-            GTA.UI.Notification.PostTicker("~r~Error con el arma:~w~ " + weaponName + " (" + ex.Message + ")", false);
+            GTA.UI.Notification.PostTicker("~r~Arma no reconocida:~w~ " + weaponName + " (" + ex.Message + ")", false);
         }
     }
 
