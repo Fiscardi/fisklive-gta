@@ -1,8 +1,11 @@
 using System;
 using System.Net;
+using System.Net.Http;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
+using System.Globalization;
 using System.Collections.Concurrent;
 using GTA;
 using GTA.Native;
@@ -19,6 +22,19 @@ public class FiskLiveGTA : Script
     private readonly ConcurrentQueue<string> _commandQueue = new ConcurrentQueue<string>();
     private volatile bool _running;
     private Vehicle _milestoneVehicle; // vehiculo actual del sistema "reemplazar" (ej. cada X likes)
+
+    // ---------- Desafio Monte Chiliad ----------
+    private static readonly Vector3 ChiliadSummit = new Vector3(450.718f, 5566.614f, 806.183f);
+    private const float ChiliadRadius = 20f; // metros de tolerancia alrededor de la cima
+    private const float ChiliadHoldSeconds = 10f;
+    private const string FiskLiveStatusUrl = "http://127.0.0.1:8420/api/gta/chiliad-status";
+
+    private bool _chiliadActive;
+    private float _chiliadHoldTimer;
+    private int _chiliadVictories;
+    private string _chiliadLastPhase = "";
+    private DateTime _chiliadLastReport = DateTime.MinValue;
+    private static readonly HttpClient _http = new HttpClient { Timeout = TimeSpan.FromMilliseconds(800) };
 
     public FiskLiveGTA()
     {
@@ -98,6 +114,11 @@ public class FiskLiveGTA : Script
                 GTA.UI.Notification.PostTicker("~r~FiskLive error:~w~ " + ex.Message, false);
             }
         }
+
+        if (_chiliadActive)
+        {
+            UpdateChiliadChallenge();
+        }
     }
 
     private void HandleCommand(string json)
@@ -153,6 +174,21 @@ public class FiskLiveGTA : Script
 
             case "spawn_ped_chaos":
                 SpawnChaosPeds(ExtractInt(json, "count", 5));
+                break;
+
+            case "chiliad_start":
+                _chiliadActive = true;
+                _chiliadHoldTimer = 0f;
+                _chiliadLastPhase = "";
+                GTA.UI.Notification.PostTicker("~g~Desafio Monte Chiliad iniciado~w~", false);
+                ReportChiliadStatus("climbing", 0f, -1f);
+                break;
+
+            case "chiliad_stop":
+                _chiliadActive = false;
+                _chiliadHoldTimer = 0f;
+                GTA.UI.Notification.PostTicker("~y~Desafio Monte Chiliad detenido~w~", false);
+                ReportChiliadStatus("stopped", 0f, -1f);
                 break;
 
             default:
@@ -377,6 +413,86 @@ public class FiskLiveGTA : Script
         }
 
         GTA.UI.Notification.PostTicker("~g~Caos desatado:~w~ " + count + " enemigos", false);
+    }
+
+    // ---------- Desafio Monte Chiliad ----------
+
+    private void UpdateChiliadChallenge()
+    {
+        Ped player = Game.Player.Character;
+
+        bool playerDown = player.IsDead || Function.Call<bool>(Hash.IS_PLAYER_BEING_ARRESTED, Game.Player, false);
+        float distance = player.Position.DistanceTo(ChiliadSummit);
+        bool atSummit = distance <= ChiliadRadius;
+
+        string phase;
+
+        if (playerDown)
+        {
+            _chiliadHoldTimer = 0f;
+            phase = "failed";
+        }
+        else if (atSummit)
+        {
+            _chiliadHoldTimer += Game.LastFrameTime;
+            if (_chiliadHoldTimer >= ChiliadHoldSeconds)
+            {
+                _chiliadVictories++;
+                _chiliadHoldTimer = 0f;
+                phase = "victory";
+                GTA.UI.Notification.PostTicker("~g~VICTORIA en el Monte Chiliad!~w~ Total: " + _chiliadVictories, false);
+            }
+            else
+            {
+                phase = "holding";
+            }
+        }
+        else
+        {
+            _chiliadHoldTimer = 0f;
+            phase = "climbing";
+        }
+
+        bool phaseChanged = phase != _chiliadLastPhase;
+        bool timeToReport = (DateTime.Now - _chiliadLastReport).TotalMilliseconds >= 500;
+
+        if (phaseChanged || timeToReport)
+        {
+            ReportChiliadStatus(phase, _chiliadHoldTimer, distance);
+            _chiliadLastPhase = phase;
+            _chiliadLastReport = DateTime.Now;
+        }
+    }
+
+    // Le avisa a FiskLive (app de Node) el estado actual del desafio, para que
+    // lo muestre en el overlay de OBS. Se manda por HTTP a la app local; si
+    // FiskLive no esta corriendo o no responde, simplemente se ignora el error
+    // y el desafio sigue funcionando igual adentro del juego.
+    private void ReportChiliadStatus(string phase, float holdSeconds, float distance)
+    {
+        string distanceStr = distance >= 0
+            ? distance.ToString("0.0", CultureInfo.InvariantCulture)
+            : "null";
+
+        string json = "{\"phase\":\"" + phase + "\""
+            + ",\"holdSeconds\":" + holdSeconds.ToString("0.0", CultureInfo.InvariantCulture)
+            + ",\"holdTarget\":" + ChiliadHoldSeconds.ToString("0.0", CultureInfo.InvariantCulture)
+            + ",\"distance\":" + distanceStr
+            + ",\"victories\":" + _chiliadVictories
+            + "}";
+
+        Task.Run(async () =>
+        {
+            try
+            {
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+                await _http.PostAsync(FiskLiveStatusUrl, content);
+            }
+            catch
+            {
+                // FiskLive no esta corriendo o no responde - no rompe el desafio
+            }
+        });
     }
 
     // ---------- Parseo JSON minimo (sin dependencias externas) ----------
