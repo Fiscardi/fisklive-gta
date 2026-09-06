@@ -290,15 +290,30 @@ public class FiskLiveGTA : Script
         Ped player = Game.Player.Character;
         Vector3 spawnPos = player.Position + player.ForwardVector * 6f;
 
-        // Borramos el vehiculo anterior de este sistema, si sigue existiendo
-        if (_milestoneVehicle != null && _milestoneVehicle.Exists())
-        {
-            _milestoneVehicle.Delete();
-        }
+        // Guardamos referencia al vehiculo que el jugador tiene AHORA, sea el
+        // que nosotros mismos le dimos antes o uno robado/encontrado en el
+        // mundo. Lo borramos recien despues de subirlo al nuevo, para que el
+        // cambio sea seguro incluso si esta manejando en movimiento.
+        Vehicle vehicleToRemove = player.IsInVehicle() ? player.CurrentVehicle : _milestoneVehicle;
+
+        // Guardamos la velocidad actual (direccion + magnitud) para pasarsela
+        // al vehiculo nuevo y que no se sienta como un frenazo brusco.
+        Vector3 previousVelocity = (vehicleToRemove != null && vehicleToRemove.Exists())
+            ? vehicleToRemove.Velocity
+            : Vector3.Zero;
+
+        // Guardamos tambien hacia donde apuntaba el auto anterior. Sin esto,
+        // el auto nuevo aparece mirando al norte por defecto, y al aplicarle
+        // la velocidad queda "patinando" de costado en vez de ir derecho.
+        float previousHeading = (vehicleToRemove != null && vehicleToRemove.Exists())
+            ? vehicleToRemove.Heading
+            : player.Heading;
 
         Vehicle veh = World.CreateVehicle(model, spawnPos);
         if (veh != null)
         {
+            veh.Heading = previousHeading;
+
             VehicleClass vClass = veh.ClassType;
             bool isGroundVehicle = vClass != VehicleClass.Planes
                 && vClass != VehicleClass.Helicopters
@@ -313,8 +328,24 @@ public class FiskLiveGTA : Script
                 veh.Position = spawnPos + new Vector3(0, 0, 3f);
             }
 
-            // Subimos al jugador directo al vehiculo nuevo (asiento del conductor)
+            // Le pasamos la velocidad que traia el auto anterior, para que el
+            // cambio se sienta continuo en vez de arrancar frenado en seco.
+            if (previousVelocity.Length() > 0.5f)
+            {
+                veh.Velocity = previousVelocity;
+            }
+
+            // Subimos al jugador directo al vehiculo nuevo (asiento del conductor).
+            // Esto lo saca automaticamente de cualquier vehiculo en el que este,
+            // incluso si esta andando.
             Function.Call(Hash.SET_PED_INTO_VEHICLE, player, veh, -1);
+
+            // Recien ahora borramos el vehiculo anterior, ya vacio (evita
+            // borrar un auto mientras el jugador todavia esta adentro)
+            if (vehicleToRemove != null && vehicleToRemove.Exists() && vehicleToRemove != veh)
+            {
+                vehicleToRemove.Delete();
+            }
 
             _milestoneVehicle = veh;
             GTA.UI.Notification.PostTicker("~g~Nuevo vehiculo:~w~ " + modelName, false);
