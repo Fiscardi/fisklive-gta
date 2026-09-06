@@ -288,13 +288,19 @@ public class FiskLiveGTA : Script
         }
 
         Ped player = Game.Player.Character;
-        Vector3 spawnPos = player.Position + player.ForwardVector * 6f;
 
         // Guardamos referencia al vehiculo que el jugador tiene AHORA, sea el
         // que nosotros mismos le dimos antes o uno robado/encontrado en el
         // mundo. Lo borramos recien despues de subirlo al nuevo, para que el
         // cambio sea seguro incluso si esta manejando en movimiento.
         Vehicle vehicleToRemove = player.IsInVehicle() ? player.CurrentVehicle : _milestoneVehicle;
+
+        // Si estamos manejando, el auto nuevo aparece EXACTAMENTE en la
+        // posicion del auto viejo (no adelantado), para que el cambio se
+        // sienta como un "reskin" instantaneo en vez de un salto/corte.
+        Vector3 spawnPos = (vehicleToRemove != null && vehicleToRemove.Exists())
+            ? vehicleToRemove.Position
+            : player.Position + player.ForwardVector * 6f;
 
         // Guardamos la velocidad actual (direccion + magnitud) para pasarsela
         // al vehiculo nuevo y que no se sienta como un frenazo brusco.
