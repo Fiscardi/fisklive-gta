@@ -209,7 +209,7 @@ public class FiskLiveGTA : Script
         // Autos chicos / raros
         "comet2", "brioso", "blista", "panto", "issi2", "duneloader",
         // Motos y bicis
-        "bati801", "akuma", "sanchez", "bmx", "cruiser", "scorcher",
+        "bati", "akuma", "sanchez", "bmx", "cruiser", "scorcher",
         // Aviones y helicopteros
         "velum", "mallard", "luxor", "buzzard", "maverick", "cargoplane",
         // Barcos y lanchas
