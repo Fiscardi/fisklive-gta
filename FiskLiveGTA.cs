@@ -180,13 +180,15 @@ public class FiskLiveGTA : Script
                 _chiliadActive = true;
                 _chiliadHoldTimer = 0f;
                 _chiliadLastPhase = "";
-                GTA.UI.Notification.PostTicker("~g~Desafio Monte Chiliad iniciado~w~", false);
+                Function.Call(Hash.SET_NEW_WAYPOINT, ChiliadSummit.X, ChiliadSummit.Y);
+                GTA.UI.Notification.PostTicker("~g~Desafio Monte Chiliad iniciado~w~ - seguí el marcador del mapa", false);
                 ReportChiliadStatus("climbing", 0f, -1f);
                 break;
 
             case "chiliad_stop":
                 _chiliadActive = false;
                 _chiliadHoldTimer = 0f;
+                Function.Call(Hash.SET_WAYPOINT_OFF);
                 GTA.UI.Notification.PostTicker("~y~Desafio Monte Chiliad detenido~w~", false);
                 ReportChiliadStatus("stopped", 0f, -1f);
                 break;
@@ -455,6 +457,13 @@ public class FiskLiveGTA : Script
 
         bool phaseChanged = phase != _chiliadLastPhase;
         bool timeToReport = (DateTime.Now - _chiliadLastReport).TotalMilliseconds >= 500;
+
+        // Si acaba de fallar (murio/lo atraparon), reponemos el marcador de guia
+        // porque puede haber respawneado lejos de donde estaba.
+        if (phaseChanged && phase == "failed")
+        {
+            Function.Call(Hash.SET_NEW_WAYPOINT, ChiliadSummit.X, ChiliadSummit.Y);
+        }
 
         if (phaseChanged || timeToReport)
         {
