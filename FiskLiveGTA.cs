@@ -498,7 +498,6 @@ public class FiskLiveGTA : Script
 
             if (boulder != null)
             {
-                boulder.HasCollision = true;
                 _activeBoulders.Add((boulder, DateTime.Now));
             }
         }
