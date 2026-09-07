@@ -25,6 +25,28 @@ public class FiskLiveGTA : Script
     private Vehicle _milestoneVehicle; // vehiculo actual del sistema "reemplazar" (ej. cada X likes)
     private List<(Prop prop, DateTime spawnedAt)> _activeBoulders = new List<(Prop, DateTime)>();
 
+    // Sistema generico de "hace esto dentro de X segundos" - lo usamos para
+    // que efectos como la neblina o el apocalipsis se reviertan solos.
+    private List<(DateTime fireAt, Action action)> _scheduledActions = new List<(DateTime, Action)>();
+
+    private void ScheduleIn(float seconds, Action action)
+    {
+        _scheduledActions.Add((DateTime.Now.AddSeconds(seconds), action));
+    }
+
+    private void ProcessScheduledActions()
+    {
+        for (int i = _scheduledActions.Count - 1; i >= 0; i--)
+        {
+            if (DateTime.Now >= _scheduledActions[i].fireAt)
+            {
+                Action pending = _scheduledActions[i].action;
+                _scheduledActions.RemoveAt(i);
+                try { pending.Invoke(); } catch { /* no dejar que un efecto roto tire abajo el resto */ }
+            }
+        }
+    }
+
     // ---------- Desafio Monte Chiliad ----------
     private static readonly Vector3 ChiliadSummit = new Vector3(501.7849f, 5603.8711f, 797.9101f);
     private const float ChiliadRadius = 20f; // metros de tolerancia alrededor de la cima
@@ -126,6 +148,11 @@ public class FiskLiveGTA : Script
         {
             CleanupBoulders();
         }
+
+        if (_scheduledActions.Count > 0)
+        {
+            ProcessScheduledActions();
+        }
     }
 
     private void HandleCommand(string json)
@@ -185,6 +212,22 @@ public class FiskLiveGTA : Script
 
             case "spawn_boulders":
                 SpawnBoulders(ExtractInt(json, "count", 3));
+                break;
+
+            case "break_vehicle":
+                BreakCurrentVehicle();
+                break;
+
+            case "blinding_fog":
+                BlindingFog(ExtractInt(json, "seconds", 15));
+                break;
+
+            case "apocalypse":
+                TriggerApocalypse(ExtractInt(json, "seconds", 30));
+                break;
+
+            case "killer_monkeys":
+                SpawnKillerMonkeys(ExtractInt(json, "count", 5));
                 break;
 
             case "chiliad_start":
@@ -519,6 +562,107 @@ public class FiskLiveGTA : Script
                 _activeBoulders.RemoveAt(i);
             }
         }
+    }
+
+    // El vehiculo actual se rompe en vivo: revienta las ruedas, se le caen
+    // las puertas, se estrellan los vidrios. No lo destruye del todo (no
+    // explota), asi que no es letal, pero queda imposible de manejar bien.
+    private void BreakCurrentVehicle()
+    {
+        Ped player = Game.Player.Character;
+        if (!player.IsInVehicle())
+        {
+            GTA.UI.Notification.PostTicker("~y~No estas en ningun vehiculo para desarmar~w~", false);
+            return;
+        }
+
+        Vehicle veh = player.CurrentVehicle;
+
+        for (int i = 0; i < 8; i++)
+        {
+            Function.Call(Hash.SET_VEHICLE_TYRE_BURST, veh, i, true, 1000f);
+            Function.Call(Hash.SET_VEHICLE_DOOR_BROKEN, veh, i, true);
+            Function.Call(Hash.SMASH_VEHICLE_WINDOW, veh, i);
+        }
+
+        veh.EngineHealth = 50f;
+        veh.BodyHealth = 50f;
+
+        GTA.UI.Notification.PostTicker("~r~¡Tu vehiculo se desarma en pedazos!~w~", false);
+    }
+
+    // Neblina/tormenta de nieve que tapa la visibilidad casi por completo
+    // durante X segundos, y despues vuelve solo a clima despejado.
+    private void BlindingFog(int seconds)
+    {
+        Function.Call(Hash.SET_WEATHER_TYPE_NOW_PERSIST, "BLIZZARD");
+        GTA.UI.Notification.PostTicker("~b~¡Neblina cegadora!~w~ No se ve nada por " + seconds + "s", false);
+
+        ScheduleIn(seconds, () =>
+        {
+            Function.Call(Hash.SET_WEATHER_TYPE_NOW_PERSIST, "CLEAR");
+            GTA.UI.Notification.PostTicker("~g~La neblina se disipa~w~", false);
+        });
+    }
+
+    // Combo de caos por X segundos: tormenta, busqueda maxima, y explosiones
+    // + enemigos cada 4 segundos. Al terminar, todo vuelve a la normalidad.
+    private void TriggerApocalypse(int seconds)
+    {
+        Function.Call(Hash.SET_WEATHER_TYPE_NOW_PERSIST, "THUNDER");
+        Function.Call(Hash.SET_PLAYER_WANTED_LEVEL, Game.Player, 5, false);
+        Function.Call(Hash.SET_PLAYER_WANTED_LEVEL_NOW, Game.Player, false);
+
+        GTA.UI.Notification.PostTicker("~r~¡APOCALIPSIS DESATADO!~w~ " + seconds + " segundos de caos total", false);
+
+        int pulses = seconds / 4;
+        for (int p = 1; p <= pulses; p++)
+        {
+            ScheduleIn(p * 4, () =>
+            {
+                ExplodeNearby();
+                SpawnChaosPeds(3);
+            });
+        }
+
+        ScheduleIn(seconds, () =>
+        {
+            Function.Call(Hash.SET_WEATHER_TYPE_NOW_PERSIST, "CLEAR");
+            Function.Call(Hash.SET_PLAYER_WANTED_LEVEL, Game.Player, 0, false);
+            Function.Call(Hash.SET_PLAYER_WANTED_LEVEL_NOW, Game.Player, false);
+            GTA.UI.Notification.PostTicker("~g~El apocalipsis termino... por ahora~w~", false);
+        });
+    }
+
+    // Chimpances hostiles atacando al jugador. Los animales no pelean igual
+    // que los humanos (no usan armas), pero con SET_PED_AS_ENEMY y
+    // TASK_COMBAT_PED van a perseguir y atacar cuerpo a cuerpo.
+    private void SpawnKillerMonkeys(int count)
+    {
+        Ped player = Game.Player.Character;
+        Model model = new Model("a_c_chimp");
+        model.Request(1000);
+
+        if (!model.IsLoaded)
+        {
+            GTA.UI.Notification.PostTicker("~r~No se pudo cargar el mono~w~", false);
+            return;
+        }
+
+        Random rnd = new Random();
+        for (int i = 0; i < count; i++)
+        {
+            Vector3 offset = player.Position + new Vector3(rnd.Next(-10, 10), rnd.Next(-10, 10), 0);
+            Ped monkey = World.CreatePed(model, offset);
+            if (monkey != null)
+            {
+                Function.Call(Hash.SET_PED_AS_ENEMY, monkey, true);
+                Function.Call(Hash.TASK_COMBAT_PED, monkey, player, 0, 16);
+            }
+        }
+
+        model.MarkAsNoLongerNeeded();
+        GTA.UI.Notification.PostTicker("~r~¡Monos asesinos sueltos!~w~", false);
     }
 
     // ---------- Desafio Monte Chiliad ----------
