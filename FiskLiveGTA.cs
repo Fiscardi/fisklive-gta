@@ -26,7 +26,7 @@ public class FiskLiveGTA : Script
     private List<(Prop prop, DateTime spawnedAt)> _activeBoulders = new List<(Prop, DateTime)>();
 
     // ---------- Desafio Monte Chiliad ----------
-    private static readonly Vector3 ChiliadSummit = new Vector3(450.718f, 5566.614f, 806.183f);
+    private static readonly Vector3 ChiliadSummit = new Vector3(501.7849f, 5603.8711f, 797.9101f);
     private const float ChiliadRadius = 20f; // metros de tolerancia alrededor de la cima
     private const float ChiliadHoldSeconds = 10f;
     private const string FiskLiveStatusUrl = "http://127.0.0.1:8420/api/gta/chiliad-status";
