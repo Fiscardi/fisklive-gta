@@ -605,24 +605,16 @@ public class FiskLiveGTA : Script
             false, true, 2, false, (string)null, (string)null, false);
     }
 
-    // Al ganar, mandamos al jugador lejos del Monte Chiliad (no simplemente
-    // reiniciamos el contador dejandolo parado ahi, para que el desafio real
-    // sea volver a subir desde cero).
+    // Punto fijo de reinicio: entrada del aeropuerto de Los Santos.
+    // Coordenadas sacadas directo del juego con el trainer.
+    private static readonly Vector3 AirportRestart = new Vector3(-1033.8783f, -2730.7104f, 13.7566f);
+
+    // Al ganar, mandamos al jugador al aeropuerto (no simplemente reiniciamos
+    // el contador dejandolo parado ahi, para que el desafio real sea volver
+    // a subir desde cero cada vez).
     private void TeleportFarFromChiliad()
     {
-        Random rnd = new Random();
-        double angle = rnd.NextDouble() * Math.PI * 2;
-        float distance = 1500f + (float)(rnd.NextDouble() * 1000f); // 1500 a 2500 unidades
-
-        float targetX = ChiliadSummit.X + (float)(Math.Cos(angle) * distance);
-        float targetY = ChiliadSummit.Y + (float)(Math.Sin(angle) * distance);
-
-        OutputArgument groundZArg = new OutputArgument();
-        Function.Call<bool>(Hash.GET_GROUND_Z_FOR_3D_COORD, targetX, targetY, 1000f, groundZArg, false);
-        float groundZ = groundZArg.GetResult<float>();
-        if (groundZ <= 0f) groundZ = 30f; // fallback razonable si no encuentra piso
-
-        Game.Player.Character.Position = new Vector3(targetX, targetY, groundZ + 1f);
+        Game.Player.Character.Position = AirportRestart;
     }
 
     private void ReportChiliadStatus(string phase, float holdSeconds, float distance)
