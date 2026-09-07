@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Globalization;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using GTA;
 using GTA.Native;
 using GTA.Math;
@@ -22,6 +23,7 @@ public class FiskLiveGTA : Script
     private readonly ConcurrentQueue<string> _commandQueue = new ConcurrentQueue<string>();
     private volatile bool _running;
     private Vehicle _milestoneVehicle; // vehiculo actual del sistema "reemplazar" (ej. cada X likes)
+    private List<(Prop prop, DateTime spawnedAt)> _activeBoulders = new List<(Prop, DateTime)>();
 
     // ---------- Desafio Monte Chiliad ----------
     private static readonly Vector3 ChiliadSummit = new Vector3(450.718f, 5566.614f, 806.183f);
@@ -119,6 +121,11 @@ public class FiskLiveGTA : Script
         {
             UpdateChiliadChallenge();
         }
+
+        if (_activeBoulders.Count > 0)
+        {
+            CleanupBoulders();
+        }
     }
 
     private void HandleCommand(string json)
@@ -174,6 +181,10 @@ public class FiskLiveGTA : Script
 
             case "spawn_ped_chaos":
                 SpawnChaosPeds(ExtractInt(json, "count", 5));
+                break;
+
+            case "spawn_boulders":
+                SpawnBoulders(ExtractInt(json, "count", 3));
                 break;
 
             case "chiliad_start":
@@ -295,25 +306,28 @@ public class FiskLiveGTA : Script
         // que nosotros mismos le dimos antes o uno robado/encontrado en el
         // mundo. Lo borramos recien despues de subirlo al nuevo, para que el
         // cambio sea seguro incluso si esta manejando en movimiento.
-        Vehicle vehicleToRemove = player.IsInVehicle() ? player.CurrentVehicle : _milestoneVehicle;
+        bool playerCurrentlyDriving = player.IsInVehicle();
+        Vehicle vehicleToRemove = playerCurrentlyDriving ? player.CurrentVehicle : _milestoneVehicle;
 
-        // Si estamos manejando, el auto nuevo aparece EXACTAMENTE en la
-        // posicion del auto viejo (no adelantado), para que el cambio se
-        // sienta como un "reskin" instantaneo en vez de un salto/corte.
-        Vector3 spawnPos = (vehicleToRemove != null && vehicleToRemove.Exists())
+        // Si esta manejando, el auto nuevo aparece EXACTAMENTE en su posicion
+        // actual (no adelantado), para que el cambio se sienta como un
+        // "reskin" instantaneo. Si esta a pie, SIEMPRE usamos su posicion
+        // actual (nunca la del auto viejo abandonado, que puede estar lejos
+        // o en el agua) para no teletransportarlo por sorpresa.
+        Vector3 spawnPos = (playerCurrentlyDriving && vehicleToRemove != null && vehicleToRemove.Exists())
             ? vehicleToRemove.Position
             : player.Position + player.ForwardVector * 6f;
 
         // Guardamos la velocidad actual (direccion + magnitud) para pasarsela
-        // al vehiculo nuevo y que no se sienta como un frenazo brusco.
-        Vector3 previousVelocity = (vehicleToRemove != null && vehicleToRemove.Exists())
+        // al vehiculo nuevo y que no se sienta como un frenazo brusco. Solo
+        // tiene sentido si esta manejando ahora mismo ese vehiculo.
+        Vector3 previousVelocity = (playerCurrentlyDriving && vehicleToRemove != null && vehicleToRemove.Exists())
             ? vehicleToRemove.Velocity
             : Vector3.Zero;
 
-        // Guardamos tambien hacia donde apuntaba el auto anterior. Sin esto,
-        // el auto nuevo aparece mirando al norte por defecto, y al aplicarle
-        // la velocidad queda "patinando" de costado en vez de ir derecho.
-        float previousHeading = (vehicleToRemove != null && vehicleToRemove.Exists())
+        // Idem con el heading: si esta a pie, usamos hacia donde mira el
+        // jugador, no la orientacion de un auto abandonado en otro lado.
+        float previousHeading = (playerCurrentlyDriving && vehicleToRemove != null && vehicleToRemove.Exists())
             ? vehicleToRemove.Heading
             : player.Heading;
 
@@ -454,6 +468,58 @@ public class FiskLiveGTA : Script
         }
 
         GTA.UI.Notification.PostTicker("~g~Caos desatado:~w~ " + count + " enemigos", false);
+    }
+
+    // Piedras/rocas gigantes con fisica real: caen desde arriba y ruedan,
+    // pueden aplastar/lastimar al jugador y a lo que encuentren en el camino.
+    // Se limpian solas a los 20 segundos para no acumular basura en el mapa.
+    private void SpawnBoulders(int count)
+    {
+        Ped player = Game.Player.Character;
+        Model model = new Model("prop_test_boulder_04");
+        model.Request(1000);
+
+        if (!model.IsLoaded)
+        {
+            GTA.UI.Notification.PostTicker("~r~No se pudo cargar la roca~w~", false);
+            return;
+        }
+
+        Random rnd = new Random();
+        for (int i = 0; i < count; i++)
+        {
+            Vector3 offset = new Vector3(
+                rnd.Next(-8, 8),
+                rnd.Next(-8, 8),
+                18f + rnd.Next(0, 8)); // bien arriba, para que caiga con fuerza
+
+            Vector3 spawnPos = player.Position + offset;
+            Prop boulder = World.CreateProp(model, spawnPos, true, false);
+
+            if (boulder != null)
+            {
+                boulder.HasCollision = true;
+                _activeBoulders.Add((boulder, DateTime.Now));
+            }
+        }
+
+        model.MarkAsNoLongerNeeded();
+        GTA.UI.Notification.PostTicker("~r~¡Cuidado!~w~ Rocas gigantes cayendo", false);
+    }
+
+    private void CleanupBoulders()
+    {
+        for (int i = _activeBoulders.Count - 1; i >= 0; i--)
+        {
+            var entry = _activeBoulders[i];
+            bool expired = (DateTime.Now - entry.spawnedAt).TotalSeconds > 20;
+
+            if (!entry.prop.Exists() || expired)
+            {
+                if (entry.prop.Exists()) entry.prop.Delete();
+                _activeBoulders.RemoveAt(i);
+            }
+        }
     }
 
     // ---------- Desafio Monte Chiliad ----------
