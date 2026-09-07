@@ -526,6 +526,11 @@ public class FiskLiveGTA : Script
 
     private void UpdateChiliadChallenge()
     {
+        // Circulo visual en el mundo, marcando la zona de la cima. Se dibuja
+        // todos los frames mientras el desafio esta activo (asi funciona
+        // DRAW_MARKER en GTA, hay que redibujarlo cada frame).
+        DrawSummitMarker();
+
         Ped player = Game.Player.Character;
 
         bool playerDown = player.IsDead || Function.Call<bool>(Hash.IS_PLAYER_BEING_ARRESTED, Game.Player, false);
@@ -548,10 +553,13 @@ public class FiskLiveGTA : Script
                 _chiliadHoldTimer = 0f;
                 phase = "victory";
                 GTA.UI.Notification.PostTicker("~g~VICTORIA en el Monte Chiliad!~w~ Total: " + _chiliadVictories, false);
+                TeleportFarFromChiliad();
             }
             else
             {
                 phase = "holding";
+                float remaining = ChiliadHoldSeconds - _chiliadHoldTimer;
+                GTA.UI.Screen.ShowSubtitle("~y~Aguantá parado: ~w~" + remaining.ToString("0.0") + "s", 100);
             }
         }
         else
@@ -563,9 +571,9 @@ public class FiskLiveGTA : Script
         bool phaseChanged = phase != _chiliadLastPhase;
         bool timeToReport = (DateTime.Now - _chiliadLastReport).TotalMilliseconds >= 500;
 
-        // Si acaba de fallar (murio/lo atraparon), reponemos el marcador de guia
-        // porque puede haber respawneado lejos de donde estaba.
-        if (phaseChanged && phase == "failed")
+        // Si acaba de fallar (murio/lo atraparon) o de ganar (y lo mandamos
+        // lejos), reponemos el marcador de guia para el proximo intento.
+        if (phaseChanged && (phase == "failed" || phase == "victory"))
         {
             Function.Call(Hash.SET_NEW_WAYPOINT, ChiliadSummit.X, ChiliadSummit.Y);
         }
@@ -582,6 +590,42 @@ public class FiskLiveGTA : Script
     // lo muestre en el overlay de OBS. Se manda por HTTP a la app local; si
     // FiskLive no esta corriendo o no responde, simplemente se ignora el error
     // y el desafio sigue funcionando igual adentro del juego.
+    // Dibuja un circulo/haz de luz en la cima, para que se vea claramente
+    // la zona objetivo del desafio. Hay que llamarlo todos los frames
+    // mientras el desafio este activo (asi funciona DRAW_MARKER en GTA).
+    private void DrawSummitMarker()
+    {
+        Function.Call(
+            Hash.DRAW_MARKER,
+            1, // tipo: cilindro con haz de luz hacia arriba
+            ChiliadSummit.X, ChiliadSummit.Y, ChiliadSummit.Z - 1f,
+            0f, 0f, 0f, // direccion
+            0f, 0f, 0f, // rotacion
+            ChiliadRadius * 2f, ChiliadRadius * 2f, 4f, // escala (diametro x2, alto)
+            255, 190, 40, 130, // color ambar semi-transparente
+            false, true, 2, false, (string)null, (string)null, false);
+    }
+
+    // Al ganar, mandamos al jugador lejos del Monte Chiliad (no simplemente
+    // reiniciamos el contador dejandolo parado ahi, para que el desafio real
+    // sea volver a subir desde cero).
+    private void TeleportFarFromChiliad()
+    {
+        Random rnd = new Random();
+        double angle = rnd.NextDouble() * Math.PI * 2;
+        float distance = 1500f + (float)(rnd.NextDouble() * 1000f); // 1500 a 2500 unidades
+
+        float targetX = ChiliadSummit.X + (float)(Math.Cos(angle) * distance);
+        float targetY = ChiliadSummit.Y + (float)(Math.Sin(angle) * distance);
+
+        OutputArgument groundZArg = new OutputArgument();
+        Function.Call<bool>(Hash.GET_GROUND_Z_FOR_3D_COORD, targetX, targetY, 1000f, groundZArg, false);
+        float groundZ = groundZArg.GetResult<float>();
+        if (groundZ <= 0f) groundZ = 30f; // fallback razonable si no encuentra piso
+
+        Game.Player.Character.Position = new Vector3(targetX, targetY, groundZ + 1f);
+    }
+
     private void ReportChiliadStatus(string phase, float holdSeconds, float distance)
     {
         string distanceStr = distance >= 0
