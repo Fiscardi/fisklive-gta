@@ -207,11 +207,13 @@ public class FiskLiveGTA : Script
         // Autos deportivos / muscle
         "adder", "zentorno", "t20", "osiris", "entityxf", "cheetah", "banshee", "sultanrs",
         // Autos chicos / raros
-        "comet2", "brioso", "blista", "panto", "issi2", "duneloader",
+        "comet2", "brioso", "blista", "panto", "issi2", "dloader",
         // Motos y bicis
         "bati", "akuma", "sanchez", "bmx", "cruiser", "scorcher",
         // Aviones y helicopteros
-        "velum", "mallard", "luxor", "buzzard", "maverick", "cargoplane",
+        "velum", "stunt", "luxor", "buzzard", "maverick", "cargoplane",
+        // Militares / tanques
+        "rhino", "tampa3",
         // Barcos y lanchas
         "jetmax", "speeder", "dinghy", "tug", "toro",
         // Utilitarios/caoticos
