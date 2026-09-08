@@ -656,6 +656,13 @@ public class FiskLiveGTA : Script
             Ped monkey = World.CreatePed(model, offset);
             if (monkey != null)
             {
+                // Los animales tienen instinto de huida programado por
+                // defecto. Sin esto, SET_PED_AS_ENEMY solo no alcanza y
+                // salen corriendo en vez de atacar.
+                Function.Call(Hash.TASK_SET_BLOCKING_OF_NON_TEMPORARY_EVENTS, monkey, true);
+                Function.Call(Hash.SET_PED_FLEE_ATTRIBUTES, monkey, 0, false);
+                Function.Call(Hash.SET_PED_COMBAT_ATTRIBUTES, monkey, 17, true);
+
                 Function.Call(Hash.SET_PED_AS_ENEMY, monkey, true);
                 Function.Call(Hash.TASK_COMBAT_PED, monkey, player, 0, 16);
             }
