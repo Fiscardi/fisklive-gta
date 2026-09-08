@@ -591,16 +591,22 @@ public class FiskLiveGTA : Script
         GTA.UI.Notification.PostTicker("~r~¡Tu vehiculo se desarma en pedazos!~w~", false);
     }
 
-    // Neblina/tormenta de nieve que tapa la visibilidad casi por completo
-    // durante X segundos, y despues vuelve solo a clima despejado.
+    // Neblina super espesa: clima de niebla + distancia de dibujado muy
+    // corta, asi el juego literalmente no renderiza nada mas alla de unos
+    // pocos metros (mucho mas fuerte que solo cambiar el clima). Vuelve
+    // todo a la normalidad solo despues de X segundos.
     private void BlindingFog(int seconds)
     {
         Function.Call(Hash.SET_WEATHER_TYPE_NOW_PERSIST, "FOGGY");
+        Function.Call(Hash.SET_WIND_SPEED, 0f); // sin viento, para que no se disperse
+        Function.Call(Hash.SET_FAR_CLIP, 12f);  // no se renderiza nada mas alla de 12 unidades
+
         GTA.UI.Notification.PostTicker("~b~¡Neblina cegadora!~w~ No se ve nada por " + seconds + "s", false);
 
         ScheduleIn(seconds, () =>
         {
             Function.Call(Hash.SET_WEATHER_TYPE_NOW_PERSIST, "CLEAR");
+            Function.Call(Hash.SET_FAR_CLIP, 800f); // volvemos a la distancia normal de dibujado
             GTA.UI.Notification.PostTicker("~g~La neblina se disipa~w~", false);
         });
     }
