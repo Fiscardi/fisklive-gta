@@ -595,7 +595,7 @@ public class FiskLiveGTA : Script
     // durante X segundos, y despues vuelve solo a clima despejado.
     private void BlindingFog(int seconds)
     {
-        Function.Call(Hash.SET_WEATHER_TYPE_NOW_PERSIST, "BLIZZARD");
+        Function.Call(Hash.SET_WEATHER_TYPE_NOW_PERSIST, "FOGGY");
         GTA.UI.Notification.PostTicker("~b~¡Neblina cegadora!~w~ No se ve nada por " + seconds + "s", false);
 
         ScheduleIn(seconds, () =>
