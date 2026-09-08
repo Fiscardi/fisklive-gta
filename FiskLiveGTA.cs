@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Globalization;
+using System.Drawing;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using GTA;
@@ -28,6 +29,7 @@ public class FiskLiveGTA : Script
     // Sistema generico de "hace esto dentro de X segundos" - lo usamos para
     // que efectos como la neblina o el apocalipsis se reviertan solos.
     private List<(DateTime fireAt, Action action)> _scheduledActions = new List<(DateTime, Action)>();
+    private bool _blindingFogActive;
 
     private void ScheduleIn(float seconds, Action action)
     {
@@ -152,6 +154,11 @@ public class FiskLiveGTA : Script
         if (_scheduledActions.Count > 0)
         {
             ProcessScheduledActions();
+        }
+
+        if (_blindingFogActive)
+        {
+            DrawFogOverlay();
         }
     }
 
@@ -591,24 +598,35 @@ public class FiskLiveGTA : Script
         GTA.UI.Notification.PostTicker("~r~¡Tu vehiculo se desarma en pedazos!~w~", false);
     }
 
-    // Neblina super espesa: clima de niebla + distancia de dibujado muy
-    // corta, asi el juego literalmente no renderiza nada mas alla de unos
-    // pocos metros (mucho mas fuerte que solo cambiar el clima). Vuelve
-    // todo a la normalidad solo despues de X segundos.
+    // Neblina super espesa: clima de niebla + un velo gris solido tapando
+    // toda la pantalla, dibujado cada frame mientras dure. Mucho mas
+    // efectivo que solo cambiar el clima. Vuelve todo a la normalidad
+    // solo despues de X segundos.
     private void BlindingFog(int seconds)
     {
         Function.Call(Hash.SET_WEATHER_TYPE_NOW_PERSIST, "FOGGY");
         Function.Call(Hash.SET_WIND_SPEED, 0f); // sin viento, para que no se disperse
-        Function.Call(Hash.SET_FAR_CLIP, 12f);  // no se renderiza nada mas alla de 12 unidades
+        _blindingFogActive = true;
 
         GTA.UI.Notification.PostTicker("~b~¡Neblina cegadora!~w~ No se ve nada por " + seconds + "s", false);
 
         ScheduleIn(seconds, () =>
         {
+            _blindingFogActive = false;
             Function.Call(Hash.SET_WEATHER_TYPE_NOW_PERSIST, "CLEAR");
-            Function.Call(Hash.SET_FAR_CLIP, 800f); // volvemos a la distancia normal de dibujado
             GTA.UI.Notification.PostTicker("~g~La neblina se disipa~w~", false);
         });
+    }
+
+    // Dibuja un velo gris casi opaco tapando toda la pantalla. Se llama
+    // todos los frames mientras _blindingFogActive sea true.
+    private void DrawFogOverlay()
+    {
+        var overlay = new GTA.UI.ContainerElement(
+            new PointF(0, 0),
+            new SizeF(GTA.UI.Screen.Width, GTA.UI.Screen.Height),
+            Color.FromArgb(235, 215, 215, 215)); // gris claro, casi opaco
+        overlay.Draw();
     }
 
     // Combo de caos por X segundos: tormenta, busqueda maxima, y explosiones
