@@ -263,7 +263,9 @@ public class FiskLiveGTA : Script
     // ---------- Acciones ----------
 
     // Lista de vehiculos "divertidos" para cuando piden uno random, mezclando categorias
-    private static readonly string[] RandomVehicles = new string[]
+    // Vehiculos terrestres para el pool random (autos, motos, bicis, buses,
+    // cuatriciclos, militares terrestres, utilitarios de caos)
+    private static readonly string[] LandVehicles = new string[]
     {
         // Autos deportivos / muscle
         "adder", "zentorno", "t20", "osiris", "entityxf", "cheetah", "banshee", "sultanrs",
@@ -271,15 +273,42 @@ public class FiskLiveGTA : Script
         "comet2", "brioso", "blista", "panto", "issi2", "dloader",
         // Motos y bicis
         "bati", "akuma", "sanchez", "bmx", "cruiser", "scorcher",
-        // Aviones y helicopteros
-        "velum", "stunt", "luxor", "buzzard", "maverick", "cargoplane",
+        // Buses
+        "bus", "coach",
+        // Cuatriciclos
+        "blazer", "blazer2", "blazer3",
+        // Militares terrestres / "humvees"
+        "insurgent", "insurgent2", "insurgent3", "menacer",
         // Militares / tanques
         "rhino", "tampa3",
-        // Barcos y lanchas
-        "jetmax", "speeder", "dinghy", "tug", "toro",
         // Utilitarios/caoticos
         "brutus", "trophytruck", "monster", "dune"
     };
+
+    // Aviones, helicopteros y barcos - el pool "especial" que sale 1 de
+    // cada 20 veces en vez del pool terrestre normal.
+    private static readonly string[] AirWaterVehicles = new string[]
+    {
+        "velum", "stunt", "luxor", "buzzard", "maverick", "cargoplane",
+        "jetmax", "speeder", "dinghy", "tug", "toro"
+    };
+
+    // Cuenta cuantas veces se pidio un vehiculo random, para que 1 de cada
+    // 20 salga del pool de aviones/barcos en vez del terrestre.
+    private int _vehicleSpawnCounter = 0;
+
+    private string PickRandomVehicleModel()
+    {
+        Random rnd = new Random();
+        _vehicleSpawnCounter++;
+
+        if (_vehicleSpawnCounter % 20 == 0)
+        {
+            return AirWaterVehicles[rnd.Next(AirWaterVehicles.Length)];
+        }
+
+        return LandVehicles[rnd.Next(LandVehicles.Length)];
+    }
 
     private void SpawnVehicle(string modelName)
     {
@@ -287,8 +316,7 @@ public class FiskLiveGTA : Script
             modelName.Equals("random", StringComparison.OrdinalIgnoreCase) ||
             modelName.Equals("aleatorio", StringComparison.OrdinalIgnoreCase))
         {
-            Random pick = new Random();
-            modelName = RandomVehicles[pick.Next(RandomVehicles.Length)];
+            modelName = PickRandomVehicleModel();
         }
 
         Model model = new Model(modelName);
@@ -338,8 +366,7 @@ public class FiskLiveGTA : Script
             modelName.Equals("random", StringComparison.OrdinalIgnoreCase) ||
             modelName.Equals("aleatorio", StringComparison.OrdinalIgnoreCase))
         {
-            Random pick = new Random();
-            modelName = RandomVehicles[pick.Next(RandomVehicles.Length)];
+            modelName = PickRandomVehicleModel();
         }
 
         Model model = new Model(modelName);
