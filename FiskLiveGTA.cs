@@ -548,6 +548,9 @@ public class FiskLiveGTA : Script
 
             if (boulder != null)
             {
+                // Un prop dinamico recien creado a veces queda "dormido" y
+                // no empieza a caer solo. Esto lo activa a la fuerza.
+                Function.Call(Hash.ACTIVATE_PHYSICS, boulder.Handle);
                 _activeBoulders.Add((boulder, DateTime.Now));
             }
         }
