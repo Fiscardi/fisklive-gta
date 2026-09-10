@@ -221,6 +221,14 @@ public class FiskLiveGTA : Script
                 SpawnBoulders(ExtractInt(json, "count", 3));
                 break;
 
+            case "spawn_giant_balls":
+                SpawnGiantBalls(ExtractInt(json, "count", 4));
+                break;
+
+            case "car_rain":
+                CarRain(ExtractInt(json, "count", 5));
+                break;
+
             case "break_vehicle":
                 BreakCurrentVehicle();
                 break;
@@ -584,6 +592,43 @@ public class FiskLiveGTA : Script
 
         model.MarkAsNoLongerNeeded();
         GTA.UI.Notification.PostTicker("~r~¡Cuidado!~w~ Rocas gigantes cayendo", false);
+    }
+
+    // Pelotas gigantes esfericas de verdad (no rocas anguladas). Mismo
+    // sistema que las rocas: caen desde arriba con fisica real y pueden
+    // golpear/aplastar al jugador y lo que encuentren en el camino.
+    private void SpawnGiantBalls(int count)
+    {
+        Ped player = Game.Player.Character;
+        Model model = new Model("prop_beachball_02");
+        model.Request(1000);
+
+        if (!model.IsLoaded)
+        {
+            GTA.UI.Notification.PostTicker("~r~No se pudo cargar la pelota~w~", false);
+            return;
+        }
+
+        Random rnd = new Random();
+        for (int i = 0; i < count; i++)
+        {
+            Vector3 offset = new Vector3(
+                rnd.Next(-8, 8),
+                rnd.Next(-8, 8),
+                18f + rnd.Next(0, 8));
+
+            Vector3 spawnPos = player.Position + offset;
+            Prop ball = World.CreateProp(model, spawnPos, true, false);
+
+            if (ball != null)
+            {
+                Function.Call(Hash.ACTIVATE_PHYSICS, ball.Handle);
+                _activeBoulders.Add((ball, DateTime.Now));
+            }
+        }
+
+        model.MarkAsNoLongerNeeded();
+        GTA.UI.Notification.PostTicker("~r~¡Pelotas gigantes cayendo!~w~", false);
     }
 
     private void CleanupBoulders()
