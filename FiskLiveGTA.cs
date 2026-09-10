@@ -25,6 +25,7 @@ public class FiskLiveGTA : Script
     private volatile bool _running;
     private Vehicle _milestoneVehicle; // vehiculo actual del sistema "reemplazar" (ej. cada X likes)
     private List<(Prop prop, DateTime spawnedAt)> _activeBoulders = new List<(Prop, DateTime)>();
+    private List<(Vehicle vehicle, DateTime spawnedAt)> _activeRainCars = new List<(Vehicle, DateTime)>();
 
     // Sistema generico de "hace esto dentro de X segundos" - lo usamos para
     // que efectos como la neblina o el apocalipsis se reviertan solos.
@@ -149,6 +150,11 @@ public class FiskLiveGTA : Script
         if (_activeBoulders.Count > 0)
         {
             CleanupBoulders();
+        }
+
+        if (_activeRainCars.Count > 0)
+        {
+            CleanupRainCars();
         }
 
         if (_scheduledActions.Count > 0)
@@ -629,6 +635,61 @@ public class FiskLiveGTA : Script
 
         model.MarkAsNoLongerNeeded();
         GTA.UI.Notification.PostTicker("~r~¡Pelotas gigantes cayendo!~w~", false);
+    }
+
+    // Lluvia de autos comunes cayendo del cielo con fisica real. Distinto
+    // sistema al de rocas/pelotas porque usa World.CreateVehicle en vez de
+    // CreateProp, y se limpian solos con su propia lista.
+    private static readonly string[] RainCarModels = new string[]
+    {
+        "blista", "asea", "premier", "primo", "panto", "issi2", "dilettante"
+    };
+
+    private void CarRain(int count)
+    {
+        Ped player = Game.Player.Character;
+        Random rnd = new Random();
+
+        for (int i = 0; i < count; i++)
+        {
+            string modelName = RainCarModels[rnd.Next(RainCarModels.Length)];
+            Model model = new Model(modelName);
+            model.Request(1000);
+            if (!model.IsLoaded) continue;
+
+            Vector3 offset = new Vector3(
+                rnd.Next(-10, 10),
+                rnd.Next(-10, 10),
+                20f + rnd.Next(0, 10));
+
+            Vector3 spawnPos = player.Position + offset;
+            Vehicle car = World.CreateVehicle(model, spawnPos);
+
+            if (car != null)
+            {
+                Function.Call(Hash.ACTIVATE_PHYSICS, car.Handle);
+                _activeRainCars.Add((car, DateTime.Now));
+            }
+
+            model.MarkAsNoLongerNeeded();
+        }
+
+        GTA.UI.Notification.PostTicker("~r~¡Lluvia de coches!~w~ Cuidado arriba", false);
+    }
+
+    private void CleanupRainCars()
+    {
+        for (int i = _activeRainCars.Count - 1; i >= 0; i--)
+        {
+            var entry = _activeRainCars[i];
+            bool expired = (DateTime.Now - entry.spawnedAt).TotalSeconds > 25;
+
+            if (!entry.vehicle.Exists() || expired)
+            {
+                if (entry.vehicle.Exists()) entry.vehicle.Delete();
+                _activeRainCars.RemoveAt(i);
+            }
+        }
     }
 
     private void CleanupBoulders()
