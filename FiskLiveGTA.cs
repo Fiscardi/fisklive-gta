@@ -606,7 +606,7 @@ public class FiskLiveGTA : Script
     private void SpawnGiantBalls(int count)
     {
         Ped player = Game.Player.Character;
-        Model model = new Model("prop_beachball_02");
+        Model model = new Model("prop_beachball_01");
         model.Request(1000);
 
         if (!model.IsLoaded)
