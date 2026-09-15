@@ -630,7 +630,13 @@ public class FiskLiveGTA : Script
 
             if (ball != null)
             {
+                // prop_juicestand normalmente esta fijo al techo del puesto,
+                // asi que puede venir con la posicion "congelada" por
+                // defecto. Sin esto, ACTIVATE_PHYSICS solo no alcanza y se
+                // queda flotando en el aire.
+                Function.Call(Hash.FREEZE_ENTITY_POSITION, ball.Handle, false);
                 Function.Call(Hash.ACTIVATE_PHYSICS, ball.Handle);
+                ball.Velocity = new Vector3(0, 0, -5f); // empujon inicial para asegurar que arranque cayendo
                 _activeBoulders.Add((ball, DateTime.Now));
             }
         }
