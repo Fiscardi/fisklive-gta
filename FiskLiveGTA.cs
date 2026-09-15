@@ -25,6 +25,12 @@ public class FiskLiveGTA : Script
     private volatile bool _running;
     private Vehicle _milestoneVehicle; // vehiculo actual del sistema "reemplazar" (ej. cada X likes)
     private List<(Prop prop, DateTime spawnedAt)> _activeBoulders = new List<(Prop, DateTime)>();
+
+    // Lista separada para las pelotas gigantes: a diferencia de las rocas,
+    // el objeto prop_juicestand no responde bien a la fisica nativa del
+    // juego (queda flotando), asi que le programamos la caida a mano.
+    private List<(Prop prop, float velocityZ, DateTime spawnedAt, bool landed, bool hitPlayer)> _fallingBalls
+        = new List<(Prop, float, DateTime, bool, bool)>();
     private List<(Vehicle vehicle, DateTime spawnedAt)> _activeRainCars = new List<(Vehicle, DateTime)>();
 
     // Sistema generico de "hace esto dentro de X segundos" - lo usamos para
@@ -150,6 +156,11 @@ public class FiskLiveGTA : Script
         if (_activeBoulders.Count > 0)
         {
             CleanupBoulders();
+        }
+
+        if (_fallingBalls.Count > 0)
+        {
+            UpdateFallingBalls();
         }
 
         if (_activeRainCars.Count > 0)
@@ -603,8 +614,8 @@ public class FiskLiveGTA : Script
     // Pelotas gigantes de verdad: el mismo objeto naranja gigante que usan
     // los puestos "Juice Stand" del mapa (el huevo de pascua de GTA V),
     // reutilizado por la comunidad de mods justamente para hacerlo rodar
-    // como bola de caos. Mismo sistema que las rocas: caen desde arriba
-    // con fisica real y pueden golpear/aplastar al jugador.
+    // como bola de caos. La fisica nativa del juego no lo mueve (se queda
+    // flotando), asi que le programamos la caida a mano, frame por frame.
     private void SpawnGiantBalls(int count)
     {
         Ped player = Game.Player.Character;
@@ -630,14 +641,8 @@ public class FiskLiveGTA : Script
 
             if (ball != null)
             {
-                // prop_juicestand normalmente esta fijo al techo del puesto,
-                // asi que puede venir con la posicion "congelada" por
-                // defecto. Sin esto, ACTIVATE_PHYSICS solo no alcanza y se
-                // queda flotando en el aire.
                 Function.Call(Hash.FREEZE_ENTITY_POSITION, ball.Handle, false);
-                Function.Call(Hash.ACTIVATE_PHYSICS, ball.Handle);
-                ball.Velocity = new Vector3(0, 0, -5f); // empujon inicial para asegurar que arranque cayendo
-                _activeBoulders.Add((ball, DateTime.Now));
+                _fallingBalls.Add((ball, 0f, DateTime.Now, false, false));
             }
         }
 
@@ -696,6 +701,66 @@ public class FiskLiveGTA : Script
             {
                 if (entry.vehicle.Exists()) entry.vehicle.Delete();
                 _activeRainCars.RemoveAt(i);
+            }
+        }
+    }
+
+    // Mueve las pelotas gigantes hacia abajo a mano, simulando gravedad,
+    // ya que su fisica nativa no responde. Cuando pasan muy cerca del
+    // jugador mientras caen, lo tira al piso (una sola vez por pelota).
+    private void UpdateFallingBalls()
+    {
+        Ped player = Game.Player.Character;
+
+        for (int i = _fallingBalls.Count - 1; i >= 0; i--)
+        {
+            var entry = _fallingBalls[i];
+
+            if (!entry.prop.Exists())
+            {
+                _fallingBalls.RemoveAt(i);
+                continue;
+            }
+
+            bool landed = entry.landed;
+            bool hitPlayer = entry.hitPlayer;
+            float velocityZ = entry.velocityZ;
+
+            if (!landed)
+            {
+                velocityZ -= 20f * Game.LastFrameTime; // gravedad simulada
+                Vector3 pos = entry.prop.Position;
+                float newZ = pos.Z + velocityZ * Game.LastFrameTime;
+
+                OutputArgument groundZArg = new OutputArgument();
+                Function.Call<bool>(Hash.GET_GROUND_Z_FOR_3D_COORD, pos.X, pos.Y, pos.Z, groundZArg, false);
+                float groundZ = groundZArg.GetResult<float>();
+
+                if (groundZ > 0f && newZ <= groundZ + 1.5f)
+                {
+                    newZ = groundZ + 1.5f;
+                    landed = true;
+                }
+
+                entry.prop.Position = new Vector3(pos.X, pos.Y, newZ);
+
+                if (!hitPlayer && entry.prop.Position.DistanceTo(player.Position) < 2.5f)
+                {
+                    Function.Call(Hash.SET_PED_TO_RAGDOLL, player, 1500, 1500, 0, 1, 1, 0);
+                    player.Health -= 30;
+                    hitPlayer = true;
+                }
+            }
+
+            bool expired = (DateTime.Now - entry.spawnedAt).TotalSeconds > 20;
+            if (expired)
+            {
+                entry.prop.Delete();
+                _fallingBalls.RemoveAt(i);
+            }
+            else
+            {
+                _fallingBalls[i] = (entry.prop, velocityZ, entry.spawnedAt, landed, hitPlayer);
             }
         }
     }
