@@ -600,13 +600,15 @@ public class FiskLiveGTA : Script
         GTA.UI.Notification.PostTicker("~r~¡Cuidado!~w~ Rocas gigantes cayendo", false);
     }
 
-    // Pelotas gigantes esfericas de verdad (no rocas anguladas). Mismo
-    // sistema que las rocas: caen desde arriba con fisica real y pueden
-    // golpear/aplastar al jugador y lo que encuentren en el camino.
+    // Pelotas gigantes de verdad: el mismo objeto naranja gigante que usan
+    // los puestos "Juice Stand" del mapa (el huevo de pascua de GTA V),
+    // reutilizado por la comunidad de mods justamente para hacerlo rodar
+    // como bola de caos. Mismo sistema que las rocas: caen desde arriba
+    // con fisica real y pueden golpear/aplastar al jugador.
     private void SpawnGiantBalls(int count)
     {
         Ped player = Game.Player.Character;
-        Model model = new Model("prop_beachball_01");
+        Model model = new Model("prop_juicestand");
         model.Request(1000);
 
         if (!model.IsLoaded)
