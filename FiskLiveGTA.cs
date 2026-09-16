@@ -736,9 +736,9 @@ public class FiskLiveGTA : Script
                 Function.Call<bool>(Hash.GET_GROUND_Z_FOR_3D_COORD, pos.X, pos.Y, pos.Z, groundZArg, false);
                 float groundZ = groundZArg.GetResult<float>();
 
-                if (groundZ > 0f && newZ <= groundZ + 1.5f)
+                if (groundZ > 0f && newZ <= groundZ + 3.5f)
                 {
-                    newZ = groundZ + 1.5f;
+                    newZ = groundZ + 3.5f;
                     landed = true;
                 }
 
