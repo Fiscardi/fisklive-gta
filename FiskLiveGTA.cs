@@ -243,7 +243,7 @@ public class FiskLiveGTA : Script
                 break;
 
             case "car_rain":
-                CarRain(ExtractInt(json, "count", 5));
+                CarRain(ExtractInt(json, "seconds", 10));
                 break;
 
             case "break_vehicle":
@@ -650,44 +650,63 @@ public class FiskLiveGTA : Script
         GTA.UI.Notification.PostTicker("~r~¡Pelotas gigantes cayendo!~w~", false);
     }
 
-    // Lluvia de autos comunes cayendo del cielo con fisica real. Distinto
-    // sistema al de rocas/pelotas porque usa World.CreateVehicle en vez de
-    // CreateProp, y se limpian solos con su propia lista.
-    private static readonly string[] RainCarModels = new string[]
+    // Lluvia de vehiculos variados (autos, buses, camiones, aviones) cayendo
+    // del cielo con fisica real, esparcidos en un area amplia (no todos
+    // arriba del jugador), durante X segundos en vez de una sola tanda.
+    private static readonly string[] RainVehicleModels = new string[]
     {
-        "blista", "asea", "premier", "primo", "panto", "issi2", "dilettante"
+        // Autos comunes
+        "blista", "asea", "premier", "primo", "panto", "issi2", "dilettante",
+        // Buses
+        "bus", "coach",
+        // Camiones
+        "phantom", "packer", "pounder", "mule", "benson", "hauler",
+        // Aviones y helicopteros
+        "velum", "stunt", "luxor", "buzzard", "maverick", "cargoplane"
     };
 
-    private void CarRain(int count)
+    private void CarRain(int seconds)
+    {
+        GTA.UI.Notification.PostTicker("~r~¡Lluvia de vehiculos!~w~ Durante " + seconds + "s", false);
+
+        const float interval = 0.6f;
+        int totalSpawns = (int)(seconds / interval);
+        if (totalSpawns < 1) totalSpawns = 1;
+
+        for (int i = 0; i < totalSpawns; i++)
+        {
+            float delay = i * interval;
+            ScheduleIn(delay, SpawnOneRainVehicle);
+        }
+    }
+
+    private void SpawnOneRainVehicle()
     {
         Ped player = Game.Player.Character;
         Random rnd = new Random();
 
-        for (int i = 0; i < count; i++)
+        string modelName = RainVehicleModels[rnd.Next(RainVehicleModels.Length)];
+        Model model = new Model(modelName);
+        model.Request(1000);
+        if (!model.IsLoaded) return;
+
+        // Area bien amplia alrededor del jugador, no todo concentrado
+        // arriba suyo, para que se sienta como lluvia de verdad.
+        Vector3 offset = new Vector3(
+            rnd.Next(-45, 45),
+            rnd.Next(-45, 45),
+            22f + rnd.Next(0, 12));
+
+        Vector3 spawnPos = player.Position + offset;
+        Vehicle vehicle = World.CreateVehicle(model, spawnPos);
+
+        if (vehicle != null)
         {
-            string modelName = RainCarModels[rnd.Next(RainCarModels.Length)];
-            Model model = new Model(modelName);
-            model.Request(1000);
-            if (!model.IsLoaded) continue;
-
-            Vector3 offset = new Vector3(
-                rnd.Next(-10, 10),
-                rnd.Next(-10, 10),
-                20f + rnd.Next(0, 10));
-
-            Vector3 spawnPos = player.Position + offset;
-            Vehicle car = World.CreateVehicle(model, spawnPos);
-
-            if (car != null)
-            {
-                Function.Call(Hash.ACTIVATE_PHYSICS, car.Handle);
-                _activeRainCars.Add((car, DateTime.Now));
-            }
-
-            model.MarkAsNoLongerNeeded();
+            Function.Call(Hash.ACTIVATE_PHYSICS, vehicle.Handle);
+            _activeRainCars.Add((vehicle, DateTime.Now));
         }
 
-        GTA.UI.Notification.PostTicker("~r~¡Lluvia de coches!~w~ Cuidado arriba", false);
+        model.MarkAsNoLongerNeeded();
     }
 
     private void CleanupRainCars()
