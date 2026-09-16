@@ -740,6 +740,12 @@ public class FiskLiveGTA : Script
                 {
                     newZ = groundZ + 3.5f;
                     landed = true;
+
+                    // Ahora que ya no esta peleando contra la gravedad,
+                    // probamos reactivar la fisica nativa: puede que a
+                    // partir de aca si responda a empujones/golpes de
+                    // cualquier cosa, no solo de autos con fuerza.
+                    Function.Call(Hash.ACTIVATE_PHYSICS, entry.prop.Handle);
                 }
 
                 entry.prop.Position = new Vector3(pos.X, pos.Y, newZ);
