@@ -1178,6 +1178,15 @@ public class FiskLiveGTA : Script
 
                 Function.Call(Hash.SET_PED_AS_ENEMY, monkey, true);
                 Function.Call(Hash.TASK_COMBAT_PED, monkey, player, 0, 16);
+
+                // Ademas del combate, lo mandamos a acercarse directo: un
+                // chimpance no tiene garantizado un set de animaciones de
+                // combate como el de un humano, asi que esto asegura que
+                // arranque moviendose hacia el jugador desde el primer
+                // frame, en vez de quedarse parado esperando una logica de
+                // combate que puede no disparar nada visible.
+                Function.Call(Hash.TASK_GO_TO_ENTITY, monkey.Handle, player.Handle, -1, 1.0f, 3.0f, 1073741824f, 0);
+
                 _activeHostilePeds.Add(monkey);
                 _activeKillerMonkeys.Add(monkey);
             }
@@ -1195,11 +1204,14 @@ public class FiskLiveGTA : Script
     {
         Ped player = Game.Player.Character;
 
-        // Bajamos el intervalo a 1s (antes 2s): la IA de "animal" del
-        // juego puede volver a meterle una reaccion de huida en cualquier
-        // momento, y cuanto mas seguido se la pisemos, menos se nota.
-        bool reassert = (DateTime.Now - _lastMonkeyReassert).TotalSeconds >= 1;
-        if (reassert) _lastMonkeyReassert = DateTime.Now;
+        // Revisamos cada 1s, pero OJO: antes esto interrumpia la tarea del
+        // mono SIEMPRE, este haciendo lo que este haciendo - por eso se
+        // veia en bucle/reseteandose todo el tiempo (le cortabamos la
+        // persecucion en curso para volver a mandarle la misma orden).
+        // Ahora solo tocamos al mono si esta huyendo de verdad; si ya te
+        // esta persiguiendo, lo dejamos tranquilo.
+        bool checkNow = (DateTime.Now - _lastMonkeyReassert).TotalSeconds >= 1;
+        if (checkNow) _lastMonkeyReassert = DateTime.Now;
 
         for (int i = _activeKillerMonkeys.Count - 1; i >= 0; i--)
         {
@@ -1211,20 +1223,19 @@ public class FiskLiveGTA : Script
                 continue;
             }
 
-            if (reassert)
+            if (checkNow)
             {
-                // CLEAR_PED_TASKS_IMMEDIATELY corta de raiz cualquier tarea
-                // de huida que el propio motor de animales le haya metido
-                // por encima de TASK_COMBAT_PED (por eso el reassign solo
-                // no alcanzaba: la tarea vieja seguia con prioridad).
-                Function.Call(Hash.CLEAR_PED_TASKS_IMMEDIATELY, monkey.Handle);
-                Function.Call(Hash.TASK_COMBAT_PED, monkey.Handle, player, 0, 16);
+                bool isFleeing = Function.Call<bool>(Hash.IS_PED_FLEEING, monkey.Handle);
 
-                // Respaldo: un chimpance no tiene garantizado un set de
-                // combate como el de un humano, asi que ademas lo mandamos
-                // a perseguir al jugador directamente. Si el combate nativo
-                // no hace nada visible, esto asegura que igual se acerque.
-                Function.Call(Hash.TASK_GO_TO_ENTITY, monkey.Handle, player.Handle, -1, 1.0f, 3.0f, 1073741824f, 0);
+                if (isFleeing)
+                {
+                    // Solo interrumpimos y reasignamos cuando hace falta:
+                    // si no esta huyendo, lo dejamos hacer lo que este
+                    // haciendo (perseguir, acercarse, etc) sin tocarlo.
+                    Function.Call(Hash.CLEAR_PED_TASKS_IMMEDIATELY, monkey.Handle);
+                    Function.Call(Hash.TASK_COMBAT_PED, monkey.Handle, player, 0, 16);
+                    Function.Call(Hash.TASK_GO_TO_ENTITY, monkey.Handle, player.Handle, -1, 1.0f, 3.0f, 1073741824f, 0);
+                }
             }
 
             if (monkey.Position.DistanceTo(player.Position) < 1.5f)
