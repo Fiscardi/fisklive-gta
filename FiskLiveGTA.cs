@@ -40,6 +40,15 @@ public class FiskLiveGTA : Script
     private List<(Vehicle vehicle, DateTime spawnedAt)> _activeRainCars = new List<(Vehicle, DateTime)>();
     private List<Ped> _activeHostilePeds = new List<Ped>(); // enemigos de caos + monos, para poder borrarlos de una
 
+    // Lista aparte solo para los monos: los "animales" del juego tienen
+    // reacciones de miedo/huida metidas por default, que pueden pisarles
+    // la tarea de combate sin avisar. Con esta lista los vamos revisando
+    // cada tick para reafirmarles la persecucion y, por las dudas, aplicar
+    // dano a mano si llegan a tocar al jugador (asi el peligro es real
+    // pase lo que pase con la IA nativa del chimpance).
+    private List<Ped> _activeKillerMonkeys = new List<Ped>();
+    private DateTime _lastMonkeyReassert = DateTime.MinValue;
+
     // Agujero negro: succiona vehiculos, peds y al jugador hacia un punto
     // fijo durante X segundos y despues explota. Si el jugador queda muy
     // cerca del centro, muere (elegido asi a proposito).
@@ -185,6 +194,19 @@ public class FiskLiveGTA : Script
             {
                 GTA.UI.Notification.PostTicker("~r~Error en pelotas gigantes:~w~ " + ex.Message, false);
                 _fallingBalls.Clear();
+            }
+        }
+
+        if (_activeKillerMonkeys.Count > 0)
+        {
+            try
+            {
+                UpdateKillerMonkeys();
+            }
+            catch (Exception ex)
+            {
+                GTA.UI.Notification.PostTicker("~r~Error en monos asesinos:~w~ " + ex.Message, false);
+                _activeKillerMonkeys.Clear();
             }
         }
 
@@ -898,6 +920,12 @@ public class FiskLiveGTA : Script
         }
         _activeHostilePeds.Clear();
 
+        // Los monos ya se borraron arriba (estan tambien en
+        // _activeHostilePeds); aca solo vaciamos la lista de seguimiento
+        // para que UpdateKillerMonkeys no siga iterando sobre entidades
+        // muertas.
+        _activeKillerMonkeys.Clear();
+
         foreach (var entry in _activeBoulders)
         {
             if (entry.prop != null && entry.prop.Exists()) entry.prop.Delete();
@@ -1130,14 +1158,80 @@ public class FiskLiveGTA : Script
                 Function.Call(Hash.SET_PED_FLEE_ATTRIBUTES, monkey, 0, false);
                 Function.Call(Hash.SET_PED_COMBAT_ATTRIBUTES, monkey, 17, true);
 
+                // Refuerzo extra: por default el chimpance no odia al
+                // jugador (relacion neutral/miedosa), asi que aunque le
+                // saquemos la huida el juego igual lo puede hacer dudar.
+                // Poniendolo en el grupo "HATES_PLAYER" y sumando mas
+                // atributos de combate, se comporta como un enemigo de
+                // verdad en vez de un animal asustado.
+                int hatesPlayerGroup = Function.Call<int>(Hash.GET_HASH_KEY, "HATES_PLAYER");
+                Function.Call(Hash.SET_PED_RELATIONSHIP_GROUP_HASH, monkey, hatesPlayerGroup);
+                Function.Call(Hash.SET_PED_COMBAT_ATTRIBUTES, monkey, 46, true); // puede pelear sin arma
+                Function.Call(Hash.SET_PED_COMBAT_ATTRIBUTES, monkey, 5, true);  // nunca se acobarda
+                Function.Call(Hash.SET_PED_COMBAT_MOVEMENT, monkey, 2);          // movimiento agresivo
+                Function.Call(Hash.SET_PED_COMBAT_RANGE, monkey, 0);             // pelea cuerpo a cuerpo, de cerca
+
+                // Marcarlo como "mission entity" evita que el juego le
+                // vuelva a asignar IA ambiental (de animal comun) por
+                // encima de la tarea de combate que le mandamos.
+                Function.Call(Hash.SET_ENTITY_AS_MISSION_ENTITY, monkey, true, true);
+
                 Function.Call(Hash.SET_PED_AS_ENEMY, monkey, true);
                 Function.Call(Hash.TASK_COMBAT_PED, monkey, player, 0, 16);
                 _activeHostilePeds.Add(monkey);
+                _activeKillerMonkeys.Add(monkey);
             }
         }
 
         model.MarkAsNoLongerNeeded();
         GTA.UI.Notification.PostTicker("~r~¡Monos asesinos sueltos!~w~", false);
+    }
+
+    // Reafirma la persecucion cada 2 segundos (por si el juego les pisa la
+    // tarea de combate con una reaccion de miedo propia del modelo animal)
+    // y aplica dano a mano cuando un mono esta pegado al jugador, para no
+    // depender de que el modelo tenga o no una animacion de mordida.
+    private void UpdateKillerMonkeys()
+    {
+        Ped player = Game.Player.Character;
+
+        // Bajamos el intervalo a 1s (antes 2s): la IA de "animal" del
+        // juego puede volver a meterle una reaccion de huida en cualquier
+        // momento, y cuanto mas seguido se la pisemos, menos se nota.
+        bool reassert = (DateTime.Now - _lastMonkeyReassert).TotalSeconds >= 1;
+        if (reassert) _lastMonkeyReassert = DateTime.Now;
+
+        for (int i = _activeKillerMonkeys.Count - 1; i >= 0; i--)
+        {
+            Ped monkey = _activeKillerMonkeys[i];
+
+            if (monkey == null || !monkey.Exists() || !monkey.IsAlive)
+            {
+                _activeKillerMonkeys.RemoveAt(i);
+                continue;
+            }
+
+            if (reassert)
+            {
+                // CLEAR_PED_TASKS_IMMEDIATELY corta de raiz cualquier tarea
+                // de huida que el propio motor de animales le haya metido
+                // por encima de TASK_COMBAT_PED (por eso el reassign solo
+                // no alcanzaba: la tarea vieja seguia con prioridad).
+                Function.Call(Hash.CLEAR_PED_TASKS_IMMEDIATELY, monkey.Handle);
+                Function.Call(Hash.TASK_COMBAT_PED, monkey.Handle, player, 0, 16);
+
+                // Respaldo: un chimpance no tiene garantizado un set de
+                // combate como el de un humano, asi que ademas lo mandamos
+                // a perseguir al jugador directamente. Si el combate nativo
+                // no hace nada visible, esto asegura que igual se acerque.
+                Function.Call(Hash.TASK_GO_TO_ENTITY, monkey.Handle, player.Handle, -1, 1.0f, 3.0f, 1073741824f, 0);
+            }
+
+            if (monkey.Position.DistanceTo(player.Position) < 1.5f)
+            {
+                player.Health = Math.Max(0, player.Health - (int)(40f * Game.LastFrameTime));
+            }
+        }
     }
 
     // ---------- Desafio Monte Chiliad ----------
