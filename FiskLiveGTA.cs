@@ -29,10 +29,35 @@ public class FiskLiveGTA : Script
     // Lista separada para las pelotas gigantes: a diferencia de las rocas,
     // el objeto prop_juicestand no responde bien a la fisica nativa del
     // juego (queda flotando), asi que le programamos la caida a mano.
-    private List<(Prop prop, float velocityZ, DateTime spawnedAt, bool landed, bool hitPlayer)> _fallingBalls
-        = new List<(Prop, float, DateTime, bool, bool)>();
+    // "landingZ" es la altura real de piso (tomada de donde esta parado el
+    // jugador al spawnear), NO se recalcula por pelota en cada frame: eso
+    // era el bug original, porque GET_GROUND_Z_FOR_3D_COORD sondeaba desde
+    // la posicion de CADA pelota, y si su X/Y caia justo arriba de un poste,
+    // cerco o muro bajo, el juego detectaba esa superficie como "piso" y la
+    // dejaba colgada en el aire en vez de seguir bajando hasta la calle.
+    private List<(Prop prop, float velocityZ, DateTime spawnedAt, bool landed, bool hitPlayer, float landingZ)> _fallingBalls
+        = new List<(Prop, float, DateTime, bool, bool, float)>();
     private List<(Vehicle vehicle, DateTime spawnedAt)> _activeRainCars = new List<(Vehicle, DateTime)>();
-    private List<Ped> _activeHostilePeds = new List<Ped>();
+    private List<Ped> _activeHostilePeds = new List<Ped>(); // enemigos de caos + monos, para poder borrarlos de una
+
+    // Lista aparte solo para los monos: los "animales" del juego tienen
+    // reacciones de miedo/huida metidas por default, que pueden pisarles
+    // la tarea de combate sin avisar. Con esta lista los vamos revisando
+    // cada tick para reafirmarles la persecucion y, por las dudas, aplicar
+    // dano a mano si llegan a tocar al jugador (asi el peligro es real
+    // pase lo que pase con la IA nativa del chimpance).
+    private List<Ped> _activeKillerMonkeys = new List<Ped>();
+    private DateTime _lastMonkeyReassert = DateTime.MinValue;
+
+    // Agujero negro: succiona vehiculos, peds y al jugador hacia un punto
+    // fijo durante X segundos y despues explota. Si el jugador queda muy
+    // cerca del centro, muere (elegido asi a proposito).
+    private bool _blackHoleActive;
+    private Vector3 _blackHoleCenter;
+    private DateTime _blackHoleStartedAt;
+    private float _blackHoleDurationSeconds;
+    private const float BlackHolePullRadius = 30f;
+    private const float BlackHoleKillRadius = 2.0f;
 
     // Sistema generico de "hace esto dentro de X segundos" - lo usamos para
     // que efectos como la neblina o el apocalipsis se reviertan solos.
@@ -161,7 +186,41 @@ public class FiskLiveGTA : Script
 
         if (_fallingBalls.Count > 0)
         {
-            UpdateFallingBalls();
+            try
+            {
+                UpdateFallingBalls();
+            }
+            catch (Exception ex)
+            {
+                GTA.UI.Notification.PostTicker("~r~Error en pelotas gigantes:~w~ " + ex.Message, false);
+                _fallingBalls.Clear();
+            }
+        }
+
+        if (_activeKillerMonkeys.Count > 0)
+        {
+            try
+            {
+                UpdateKillerMonkeys();
+            }
+            catch (Exception ex)
+            {
+                GTA.UI.Notification.PostTicker("~r~Error en monos asesinos:~w~ " + ex.Message, false);
+                _activeKillerMonkeys.Clear();
+            }
+        }
+
+        if (_blackHoleActive)
+        {
+            try
+            {
+                UpdateBlackHole();
+            }
+            catch (Exception ex)
+            {
+                GTA.UI.Notification.PostTicker("~r~Error en agujero negro:~w~ " + ex.Message, false);
+                _blackHoleActive = false;
+            }
         }
 
         if (_activeRainCars.Count > 0)
@@ -241,6 +300,10 @@ public class FiskLiveGTA : Script
 
             case "spawn_giant_balls":
                 SpawnGiantBalls(ExtractInt(json, "count", 4));
+                break;
+
+            case "black_hole":
+                StartBlackHole(ExtractInt(json, "seconds", 8));
                 break;
 
             case "car_rain":
@@ -533,6 +596,113 @@ public class FiskLiveGTA : Script
         Function.Call(Hash.ADD_EXPLOSION, pos.X, pos.Y, pos.Z, 2, 1.5f, true, false, 1.0f);
     }
 
+    // ---------- Agujero negro ----------
+
+    private void StartBlackHole(int seconds)
+    {
+        if (_blackHoleActive)
+        {
+            GTA.UI.Notification.PostTicker("~y~Ya hay un agujero negro activo~w~", false);
+            return;
+        }
+
+        Ped player = Game.Player.Character;
+
+        // Lo ubicamos un poco enfrente y a la altura de la cabeza del
+        // jugador: se ve bien y da un segundo para reaccionar antes de
+        // que la succion empiece a jalar fuerte.
+        _blackHoleCenter = player.Position + player.ForwardVector * 6f + new Vector3(0f, 0f, 1.2f);
+        _blackHoleStartedAt = DateTime.Now;
+        _blackHoleDurationSeconds = Math.Max(3, seconds);
+        _blackHoleActive = true;
+
+        GTA.UI.Notification.PostTicker("~p~¡Se abrió un agujero negro!~w~ Corré.", false);
+    }
+
+    private void UpdateBlackHole()
+    {
+        double elapsed = (DateTime.Now - _blackHoleStartedAt).TotalSeconds;
+
+        if (elapsed >= _blackHoleDurationSeconds)
+        {
+            ExplodeBlackHole();
+            return;
+        }
+
+        Ped player = Game.Player.Character;
+
+        // "Agujero" dibujado como marcador nativo (no depende de ningun
+        // asset de particulas externo, asi que no se rompe entre versiones
+        // del juego): una esfera negra que pulsa y va creciendo.
+        float growth = 1f + (float)(elapsed / _blackHoleDurationSeconds);
+        float pulse = 1.0f + 0.15f * (float)Math.Sin(elapsed * 6.0);
+        World.DrawMarker(
+            MarkerType.DebugSphere,
+            _blackHoleCenter,
+            Vector3.Zero,
+            Vector3.Zero,
+            new Vector3(1.6f, 1.6f, 1.6f) * growth * pulse,
+            Color.FromArgb(235, 8, 6, 14));
+
+        // La succion se hace mas fuerte con el tiempo, para que se sienta
+        // que el agujero "crece" y cada vez es mas dificil escapar de el.
+        float pullStrength = 6f + (float)elapsed * 1.5f;
+
+        PullEntityToward(player, pullStrength);
+        if (player.Position.DistanceTo(_blackHoleCenter) < BlackHoleKillRadius)
+        {
+            player.Health = 0; // el agujero negro tambien mata al jugador si lo atrapa
+            GTA.UI.Notification.PostTicker("~r~¡El agujero negro te devoró!~w~", false);
+        }
+
+        foreach (Vehicle vehicle in World.GetNearbyVehicles(_blackHoleCenter, BlackHolePullRadius))
+        {
+            if (vehicle == null || !vehicle.Exists()) continue;
+            PullEntityToward(vehicle, pullStrength);
+        }
+
+        foreach (Ped ped in World.GetNearbyPeds(_blackHoleCenter, BlackHolePullRadius))
+        {
+            if (ped == null || !ped.Exists() || ped == player) continue;
+            PullEntityToward(ped, pullStrength);
+            if (ped.IsAlive && ped.Position.DistanceTo(_blackHoleCenter) < BlackHoleKillRadius)
+            {
+                ped.Health = 0;
+            }
+        }
+    }
+
+    private void PullEntityToward(Entity entity, float strength)
+    {
+        if (entity == null || !entity.Exists()) return;
+
+        Vector3 toCenter = _blackHoleCenter - entity.Position;
+        float dist = toCenter.Length();
+        if (dist < 0.15f) return;
+
+        Vector3 dir = toCenter / dist;
+
+        // Mientras mas cerca del centro, mas fuerte tira (como gravedad
+        // real), asi el final se siente como una caida brusca.
+        float factor = strength * (1f + (BlackHolePullRadius - Math.Min(dist, BlackHolePullRadius)) / BlackHolePullRadius);
+
+        Function.Call(Hash.APPLY_FORCE_TO_ENTITY, entity.Handle, 3,
+            dir.X * factor, dir.Y * factor, dir.Z * factor,
+            0f, 0f, 0f, 0, false, true, true, false, true);
+    }
+
+    private void ExplodeBlackHole()
+    {
+        Vector3 center = _blackHoleCenter;
+
+        // Explosion grande en el centro: todo lo que quedo atrapado cerca
+        // sale disparado, como si el colapso lo escupiera.
+        Function.Call(Hash.ADD_EXPLOSION, center.X, center.Y, center.Z, 2, 2.2f, true, false, 1.0f);
+
+        GTA.UI.Notification.PostTicker("~p~El agujero negro colapsó~w~", false);
+        _blackHoleActive = false;
+    }
+
     private void TeleportRandom()
     {
         Random rnd = new Random();
@@ -630,6 +800,12 @@ public class FiskLiveGTA : Script
             return;
         }
 
+        // Piso real, calculado UNA sola vez desde donde esta parado el
+        // jugador (ahi sabemos con certeza que hay calle/vereda de verdad,
+        // no un poste o cerco). Todas las pelotas de esta tanda caen hasta
+        // esta altura, sin importar sobre que objeto quede su X/Y.
+        float landingZ = player.Position.Z;
+
         Random rnd = new Random();
         for (int i = 0; i < count; i++)
         {
@@ -643,8 +819,14 @@ public class FiskLiveGTA : Script
 
             if (ball != null)
             {
+                // Ademas de descongelarla, forzamos colision activa y la
+                // marcamos como "mission entity" para que el juego no la
+                // trate como decoracion ambiente y le pise los cambios de
+                // posicion que hacemos a mano cada frame.
                 Function.Call(Hash.FREEZE_ENTITY_POSITION, ball.Handle, false);
-                _fallingBalls.Add((ball, 0f, DateTime.Now, false, false));
+                Function.Call(Hash.SET_ENTITY_COLLISION, ball.Handle, true, true);
+                Function.Call(Hash.SET_ENTITY_AS_MISSION_ENTITY, ball.Handle, true, true);
+                _fallingBalls.Add((ball, 0f, DateTime.Now, false, false, landingZ));
             }
         }
 
@@ -727,9 +909,9 @@ public class FiskLiveGTA : Script
     }
 
     // Borra TODO el caos activo de una: monos, enemigos, rocas, pelotas,
-    // autos de la lluvia, y resetea clima/busqueda. Se llama automaticamente
-    // al ganar o al morir en el desafio del Monte Chiliad, para arrancar
-    // cada intento nuevo limpio.
+    // autos de la lluvia, agujero negro, y resetea clima/busqueda. Se llama
+    // automaticamente al ganar o al morir en el desafio del Monte Chiliad,
+    // para arrancar cada intento nuevo limpio.
     private void CleanupAllChaos()
     {
         foreach (Ped ped in _activeHostilePeds)
@@ -737,6 +919,12 @@ public class FiskLiveGTA : Script
             if (ped != null && ped.Exists()) ped.Delete();
         }
         _activeHostilePeds.Clear();
+
+        // Los monos ya se borraron arriba (estan tambien en
+        // _activeHostilePeds); aca solo vaciamos la lista de seguimiento
+        // para que UpdateKillerMonkeys no siga iterando sobre entidades
+        // muertas.
+        _activeKillerMonkeys.Clear();
 
         foreach (var entry in _activeBoulders)
         {
@@ -755,6 +943,10 @@ public class FiskLiveGTA : Script
             if (entry.vehicle != null && entry.vehicle.Exists()) entry.vehicle.Delete();
         }
         _activeRainCars.Clear();
+
+        // El agujero negro no tiene props/entidades propias que borrar (es
+        // un marcador dibujado + fuerzas), asi que alcanza con apagarlo.
+        _blackHoleActive = false;
 
         // Cancelamos tambien cualquier efecto pendiente (pulsos de
         // apocalipsis, fin de neblina, etc) para que no sigan disparando
@@ -796,19 +988,19 @@ public class FiskLiveGTA : Script
                 Vector3 pos = entry.prop.Position;
                 float newZ = pos.Z + velocityZ * Game.LastFrameTime;
 
-                OutputArgument groundZArg = new OutputArgument();
-                Function.Call<bool>(Hash.GET_GROUND_Z_FOR_3D_COORD, pos.X, pos.Y, pos.Z, groundZArg, false);
-                float groundZ = groundZArg.GetResult<float>();
-
-                if (groundZ > 0f && newZ <= groundZ + 3.5f)
+                // Usamos landingZ (piso real, tomado del jugador al spawnear)
+                // en vez de volver a sondear el piso bajo la pelota: eso era
+                // lo que las dejaba colgadas arriba de postes/cercos.
+                if (newZ <= entry.landingZ + 1.0f)
                 {
-                    newZ = groundZ + 3.5f;
+                    newZ = entry.landingZ + 1.0f; // apoyada sobre el piso, sin incrustarse
                     landed = true;
 
                     // Ahora que ya no esta peleando contra la gravedad,
                     // probamos reactivar la fisica nativa: puede que a
                     // partir de aca si responda a empujones/golpes de
                     // cualquier cosa, no solo de autos con fuerza.
+                    Function.Call(Hash.FREEZE_ENTITY_POSITION, entry.prop.Handle, false);
                     Function.Call(Hash.ACTIVATE_PHYSICS, entry.prop.Handle);
                 }
 
@@ -830,7 +1022,7 @@ public class FiskLiveGTA : Script
             }
             else
             {
-                _fallingBalls[i] = (entry.prop, velocityZ, entry.spawnedAt, landed, hitPlayer);
+                _fallingBalls[i] = (entry.prop, velocityZ, entry.spawnedAt, landed, hitPlayer, entry.landingZ);
             }
         }
     }
@@ -953,8 +1145,6 @@ public class FiskLiveGTA : Script
         }
 
         Random rnd = new Random();
-        WeaponHash[] monkeyWeapons = { WeaponHash.Knife, WeaponHash.Hatchet };
-
         for (int i = 0; i < count; i++)
         {
             Vector3 offset = player.Position + new Vector3(rnd.Next(-10, 10), rnd.Next(-10, 10), 0);
@@ -968,19 +1158,97 @@ public class FiskLiveGTA : Script
                 Function.Call(Hash.SET_PED_FLEE_ATTRIBUTES, monkey, 0, false);
                 Function.Call(Hash.SET_PED_COMBAT_ATTRIBUTES, monkey, 17, true);
 
+                // Refuerzo extra: por default el chimpance no odia al
+                // jugador (relacion neutral/miedosa), asi que aunque le
+                // saquemos la huida el juego igual lo puede hacer dudar.
+                // Poniendolo en el grupo "HATES_PLAYER" y sumando mas
+                // atributos de combate, se comporta como un enemigo de
+                // verdad en vez de un animal asustado.
+                int hatesPlayerGroup = Function.Call<int>(Hash.GET_HASH_KEY, "HATES_PLAYER");
+                Function.Call(Hash.SET_PED_RELATIONSHIP_GROUP_HASH, monkey, hatesPlayerGroup);
+                Function.Call(Hash.SET_PED_COMBAT_ATTRIBUTES, monkey, 46, true); // puede pelear sin arma
+                Function.Call(Hash.SET_PED_COMBAT_ATTRIBUTES, monkey, 5, true);  // nunca se acobarda
+                Function.Call(Hash.SET_PED_COMBAT_MOVEMENT, monkey, 2);          // movimiento agresivo
+                Function.Call(Hash.SET_PED_COMBAT_RANGE, monkey, 0);             // pelea cuerpo a cuerpo, de cerca
+
+                // Marcarlo como "mission entity" evita que el juego le
+                // vuelva a asignar IA ambiental (de animal comun) por
+                // encima de la tarea de combate que le mandamos.
+                Function.Call(Hash.SET_ENTITY_AS_MISSION_ENTITY, monkey, true, true);
+
                 // Le damos un arma cuerpo a cuerpo. Sin arma, la IA de
-                // combate de un animal a veces no tiene bien definida la
-                // animacion de ataque y queda en loop sin completarla.
+                // combate de un animal a veces no completa bien la
+                // animacion de ataque.
+                WeaponHash[] monkeyWeapons = { WeaponHash.Knife, WeaponHash.Hatchet };
                 monkey.Weapons.Give(monkeyWeapons[rnd.Next(monkeyWeapons.Length)], 1, true, true);
 
                 Function.Call(Hash.SET_PED_AS_ENEMY, monkey, true);
                 Function.Call(Hash.TASK_COMBAT_PED, monkey, player, 0, 16);
+
+                // Ademas del combate, lo mandamos a acercarse directo: un
+                // chimpance no tiene garantizado un set de animaciones de
+                // combate como el de un humano, asi que esto asegura que
+                // arranque moviendose hacia el jugador desde el primer
+                // frame, en vez de quedarse parado esperando una logica de
+                // combate que puede no disparar nada visible.
+                Function.Call(Hash.TASK_GO_TO_ENTITY, monkey.Handle, player.Handle, -1, 1.0f, 3.0f, 1073741824f, 0);
+
                 _activeHostilePeds.Add(monkey);
+                _activeKillerMonkeys.Add(monkey);
             }
         }
 
         model.MarkAsNoLongerNeeded();
         GTA.UI.Notification.PostTicker("~r~¡Monos asesinos sueltos!~w~", false);
+    }
+
+    // Reafirma la persecucion cada 2 segundos (por si el juego les pisa la
+    // tarea de combate con una reaccion de miedo propia del modelo animal)
+    // y aplica dano a mano cuando un mono esta pegado al jugador, para no
+    // depender de que el modelo tenga o no una animacion de mordida.
+    private void UpdateKillerMonkeys()
+    {
+        Ped player = Game.Player.Character;
+
+        // Revisamos cada 1s, pero OJO: antes esto interrumpia la tarea del
+        // mono SIEMPRE, este haciendo lo que este haciendo - por eso se
+        // veia en bucle/reseteandose todo el tiempo (le cortabamos la
+        // persecucion en curso para volver a mandarle la misma orden).
+        // Ahora solo tocamos al mono si esta huyendo de verdad; si ya te
+        // esta persiguiendo, lo dejamos tranquilo.
+        bool checkNow = (DateTime.Now - _lastMonkeyReassert).TotalSeconds >= 1;
+        if (checkNow) _lastMonkeyReassert = DateTime.Now;
+
+        for (int i = _activeKillerMonkeys.Count - 1; i >= 0; i--)
+        {
+            Ped monkey = _activeKillerMonkeys[i];
+
+            if (monkey == null || !monkey.Exists() || !monkey.IsAlive)
+            {
+                _activeKillerMonkeys.RemoveAt(i);
+                continue;
+            }
+
+            if (checkNow)
+            {
+                bool isFleeing = Function.Call<bool>(Hash.IS_PED_FLEEING, monkey.Handle);
+
+                if (isFleeing)
+                {
+                    // Solo interrumpimos y reasignamos cuando hace falta:
+                    // si no esta huyendo, lo dejamos hacer lo que este
+                    // haciendo (perseguir, acercarse, etc) sin tocarlo.
+                    Function.Call(Hash.CLEAR_PED_TASKS_IMMEDIATELY, monkey.Handle);
+                    Function.Call(Hash.TASK_COMBAT_PED, monkey.Handle, player, 0, 16);
+                    Function.Call(Hash.TASK_GO_TO_ENTITY, monkey.Handle, player.Handle, -1, 1.0f, 3.0f, 1073741824f, 0);
+                }
+            }
+
+            if (monkey.Position.DistanceTo(player.Position) < 1.5f)
+            {
+                player.Health = Math.Max(0, player.Health - (int)(40f * Game.LastFrameTime));
+            }
+        }
     }
 
     // ---------- Desafio Monte Chiliad ----------
