@@ -826,6 +826,19 @@ public class FiskLiveGTA : Script
                 Function.Call(Hash.FREEZE_ENTITY_POSITION, ball.Handle, false);
                 Function.Call(Hash.SET_ENTITY_COLLISION, ball.Handle, true, true);
                 Function.Call(Hash.SET_ENTITY_AS_MISSION_ENTITY, ball.Handle, true, true);
+
+                // La pelota puede caer casi encima del jugador (offset de
+                // hasta 8 unidades). Si al activar la fisica nativa queda
+                // solapada con el colisionador del jugador, el motor la
+                // empuja hacia arriba tratando de resolver esa
+                // superposicion, y eso es lo que la deja flotando a la
+                // altura del cuerpo/cabeza en vez de tocar el piso. Como
+                // el "golpe" al jugador ya lo simulamos a mano (ragdoll +
+                // dano, unas lineas mas abajo en UpdateFallingBalls), no
+                // hace falta que la fisica de la pelota choque contra el
+                // jugador para nada.
+                Function.Call(Hash.SET_ENTITY_NO_COLLISION_ENTITY, ball.Handle, player.Handle, true);
+
                 _fallingBalls.Add((ball, 0f, DateTime.Now, false, false, landingZ));
             }
         }
@@ -981,6 +994,11 @@ public class FiskLiveGTA : Script
             bool landed = entry.landed;
             bool hitPlayer = entry.hitPlayer;
             float velocityZ = entry.velocityZ;
+
+            // Reafirmamos esto cada frame: en algunas versiones del juego
+            // SET_ENTITY_NO_COLLISION_ENTITY solo dura "este frame" y hay
+            // que repetirlo para que se mantenga durante toda la caida.
+            Function.Call(Hash.SET_ENTITY_NO_COLLISION_ENTITY, entry.prop.Handle, player.Handle, true);
 
             if (!landed)
             {
