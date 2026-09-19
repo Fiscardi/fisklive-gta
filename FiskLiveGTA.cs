@@ -1176,11 +1176,14 @@ public class FiskLiveGTA : Script
                 // encima de la tarea de combate que le mandamos.
                 Function.Call(Hash.SET_ENTITY_AS_MISSION_ENTITY, monkey, true, true);
 
-                // Le damos un arma cuerpo a cuerpo. Sin arma, la IA de
-                // combate de un animal a veces no completa bien la
-                // animacion de ataque.
-                WeaponHash[] monkeyWeapons = { WeaponHash.Knife, WeaponHash.Hatchet };
-                monkey.Weapons.Give(monkeyWeapons[rnd.Next(monkeyWeapons.Length)], 1, true, true);
+                // OJO: NO le damos arma (cuchillo/hacha). a_c_chimp es un
+                // ped de tipo animal, sin el esqueleto de manos/agarre que
+                // tienen los humanos. Darle un arma que no puede sostener
+                // bien confunde la resolucion de la animacion de combate,
+                // y el juego cae de nuevo al comportamiento por defecto
+                // del animal (huir) - que es exactamente lo que paso aca.
+                // Si en algun momento se quiere reintentar esto, hay que
+                // probarlo aparte, no asumir que es una mejora inofensiva.
 
                 Function.Call(Hash.SET_PED_AS_ENEMY, monkey, true);
                 Function.Call(Hash.TASK_COMBAT_PED, monkey, player, 0, 16);
