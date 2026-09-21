@@ -63,6 +63,7 @@ public class FiskLiveGTA : Script
     // que efectos como la neblina o el apocalipsis se reviertan solos.
     private List<(DateTime fireAt, Action action)> _scheduledActions = new List<(DateTime, Action)>();
     private bool _blindingFogActive;
+    private bool _apocalypseActive;
 
     private void ScheduleIn(float seconds, Action action)
     {
@@ -826,19 +827,6 @@ public class FiskLiveGTA : Script
                 Function.Call(Hash.FREEZE_ENTITY_POSITION, ball.Handle, false);
                 Function.Call(Hash.SET_ENTITY_COLLISION, ball.Handle, true, true);
                 Function.Call(Hash.SET_ENTITY_AS_MISSION_ENTITY, ball.Handle, true, true);
-
-                // La pelota puede caer casi encima del jugador (offset de
-                // hasta 8 unidades). Si al activar la fisica nativa queda
-                // solapada con el colisionador del jugador, el motor la
-                // empuja hacia arriba tratando de resolver esa
-                // superposicion, y eso es lo que la deja flotando a la
-                // altura del cuerpo/cabeza en vez de tocar el piso. Como
-                // el "golpe" al jugador ya lo simulamos a mano (ragdoll +
-                // dano, unas lineas mas abajo en UpdateFallingBalls), no
-                // hace falta que la fisica de la pelota choque contra el
-                // jugador para nada.
-                Function.Call(Hash.SET_ENTITY_NO_COLLISION_ENTITY, ball.Handle, player.Handle, true);
-
                 _fallingBalls.Add((ball, 0f, DateTime.Now, false, false, landingZ));
             }
         }
@@ -961,17 +949,19 @@ public class FiskLiveGTA : Script
         // un marcador dibujado + fuerzas), asi que alcanza con apagarlo.
         _blackHoleActive = false;
 
-        // Cancelamos tambien cualquier efecto pendiente (pulsos de
-        // apocalipsis, fin de neblina, etc) para que no sigan disparando
-        // despues de la limpieza.
-        _scheduledActions.Clear();
+        // Si hay un apocalipsis o una niebla en curso, los dejamos seguir
+        // su propio reloj: no cancelamos sus pulsos pendientes ni tocamos
+        // clima/busqueda, para que no se corten en seco solo porque el
+        // jugador murio en el desafio del Monte Chiliad.
+        if (!_apocalypseActive && !_blindingFogActive)
+        {
+            _scheduledActions.Clear();
+            Function.Call(Hash.SET_WEATHER_TYPE_NOW_PERSIST, "CLEAR");
+            Function.Call(Hash.SET_PLAYER_WANTED_LEVEL, Game.Player, 0, false);
+            Function.Call(Hash.SET_PLAYER_WANTED_LEVEL_NOW, Game.Player, false);
+        }
 
-        Function.Call(Hash.SET_WEATHER_TYPE_NOW_PERSIST, "CLEAR");
-        Function.Call(Hash.SET_PLAYER_WANTED_LEVEL, Game.Player, 0, false);
-        Function.Call(Hash.SET_PLAYER_WANTED_LEVEL_NOW, Game.Player, false);
-        _blindingFogActive = false;
-
-        GTA.UI.Notification.PostTicker("~b~Se limpio todo el caos~w~", false);
+        GTA.UI.Notification.PostTicker("~b~Se limpio el caos~w~", false);
     }
 
     // Mueve las pelotas gigantes hacia abajo a mano, simulando gravedad,
@@ -995,23 +985,27 @@ public class FiskLiveGTA : Script
             bool hitPlayer = entry.hitPlayer;
             float velocityZ = entry.velocityZ;
 
-            // Reafirmamos esto cada frame: en algunas versiones del juego
-            // SET_ENTITY_NO_COLLISION_ENTITY solo dura "este frame" y hay
-            // que repetirlo para que se mantenga durante toda la caida.
-            Function.Call(Hash.SET_ENTITY_NO_COLLISION_ENTITY, entry.prop.Handle, player.Handle, true);
-
             if (!landed)
             {
                 velocityZ -= 20f * Game.LastFrameTime; // gravedad simulada
                 Vector3 pos = entry.prop.Position;
                 float newZ = pos.Z + velocityZ * Game.LastFrameTime;
 
-                // Usamos landingZ (piso real, tomado del jugador al spawnear)
-                // en vez de volver a sondear el piso bajo la pelota: eso era
-                // lo que las dejaba colgadas arriba de postes/cercos.
-                if (newZ <= entry.landingZ + 1.0f)
+                // Medimos el piso real en la posicion X/Y de ESTA pelota
+                // puntual (mas preciso que usar la altura del jugador para
+                // todas). Si el resultado da algo raro (mucho mas alto que
+                // el jugador, senal de que pego en un cable/poste en vez
+                // del piso de verdad), usamos landingZ como respaldo.
+                OutputArgument groundZArg = new OutputArgument();
+                Function.Call<bool>(Hash.GET_GROUND_Z_FOR_3D_COORD, pos.X, pos.Y, pos.Z, groundZArg, false);
+                float groundZ = groundZArg.GetResult<float>();
+
+                bool groundLooksValid = groundZ > 0f && Math.Abs(groundZ - entry.landingZ) < 15f;
+                float effectiveFloor = groundLooksValid ? groundZ : entry.landingZ;
+
+                if (newZ <= effectiveFloor + 1.0f)
                 {
-                    newZ = entry.landingZ + 1.0f; // apoyada sobre el piso, sin incrustarse
+                    newZ = effectiveFloor + 1.0f; // apoyada sobre el piso, sin incrustarse
                     landed = true;
 
                     // Ahora que ya no esta peleando contra la gravedad,
@@ -1122,6 +1116,7 @@ public class FiskLiveGTA : Script
     // + enemigos cada 4 segundos. Al terminar, todo vuelve a la normalidad.
     private void TriggerApocalypse(int seconds)
     {
+        _apocalypseActive = true;
         Function.Call(Hash.SET_WEATHER_TYPE_NOW_PERSIST, "THUNDER");
         Function.Call(Hash.SET_PLAYER_WANTED_LEVEL, Game.Player, 5, false);
         Function.Call(Hash.SET_PLAYER_WANTED_LEVEL_NOW, Game.Player, false);
@@ -1140,6 +1135,7 @@ public class FiskLiveGTA : Script
 
         ScheduleIn(seconds, () =>
         {
+            _apocalypseActive = false;
             Function.Call(Hash.SET_WEATHER_TYPE_NOW_PERSIST, "CLEAR");
             Function.Call(Hash.SET_PLAYER_WANTED_LEVEL, Game.Player, 0, false);
             Function.Call(Hash.SET_PLAYER_WANTED_LEVEL_NOW, Game.Player, false);
@@ -1194,14 +1190,11 @@ public class FiskLiveGTA : Script
                 // encima de la tarea de combate que le mandamos.
                 Function.Call(Hash.SET_ENTITY_AS_MISSION_ENTITY, monkey, true, true);
 
-                // OJO: NO le damos arma (cuchillo/hacha). a_c_chimp es un
-                // ped de tipo animal, sin el esqueleto de manos/agarre que
-                // tienen los humanos. Darle un arma que no puede sostener
-                // bien confunde la resolucion de la animacion de combate,
-                // y el juego cae de nuevo al comportamiento por defecto
-                // del animal (huir) - que es exactamente lo que paso aca.
-                // Si en algun momento se quiere reintentar esto, hay que
-                // probarlo aparte, no asumir que es una mejora inofensiva.
+                // Le damos un arma cuerpo a cuerpo. Sin arma, la IA de
+                // combate de un animal a veces no completa bien la
+                // animacion de ataque.
+                WeaponHash[] monkeyWeapons = { WeaponHash.Knife, WeaponHash.Hatchet };
+                monkey.Weapons.Give(monkeyWeapons[rnd.Next(monkeyWeapons.Length)], 1, true, true);
 
                 Function.Call(Hash.SET_PED_AS_ENEMY, monkey, true);
                 Function.Call(Hash.TASK_COMBAT_PED, monkey, player, 0, 16);
