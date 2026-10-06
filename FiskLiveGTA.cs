@@ -56,14 +56,13 @@ public class FiskLiveGTA : Script
     private Vector3 _blackHoleCenter;
     private DateTime _blackHoleStartedAt;
     private float _blackHoleDurationSeconds;
-    private const float BlackHolePullRadius = 30f;
-    private const float BlackHoleKillRadius = 2.0f;
+    private const float BlackHolePullRadius = 45f;
+    private const float BlackHoleKillRadius = 2.8f;
 
     // Sistema generico de "hace esto dentro de X segundos" - lo usamos para
     // que efectos como la neblina o el apocalipsis se reviertan solos.
     private List<(DateTime fireAt, Action action)> _scheduledActions = new List<(DateTime, Action)>();
     private bool _blindingFogActive;
-    private bool _apocalypseActive;
 
     private void ScheduleIn(float seconds, Action action)
     {
@@ -609,10 +608,10 @@ public class FiskLiveGTA : Script
 
         Ped player = Game.Player.Character;
 
-        // Lo ubicamos un poco enfrente y a la altura de la cabeza del
-        // jugador: se ve bien y da un segundo para reaccionar antes de
-        // que la succion empiece a jalar fuerte.
-        _blackHoleCenter = player.Position + player.ForwardVector * 6f + new Vector3(0f, 0f, 1.2f);
+        // Lo ubicamos directo ARRIBA del jugador (no enfrente): se ve mas
+        // intimidante abrirse justo sobre su cabeza, y tira todo hacia
+        // arriba en vez de hacia un costado, que da mas espectaculo.
+        _blackHoleCenter = player.Position + new Vector3(0f, 0f, 8f);
         _blackHoleStartedAt = DateTime.Now;
         _blackHoleDurationSeconds = Math.Max(3, seconds);
         _blackHoleActive = true;
@@ -635,19 +634,21 @@ public class FiskLiveGTA : Script
         // "Agujero" dibujado como marcador nativo (no depende de ningun
         // asset de particulas externo, asi que no se rompe entre versiones
         // del juego): una esfera negra que pulsa y va creciendo.
-        float growth = 1f + (float)(elapsed / _blackHoleDurationSeconds);
-        float pulse = 1.0f + 0.15f * (float)Math.Sin(elapsed * 6.0);
+        float growth = 1f + (float)(elapsed / _blackHoleDurationSeconds) * 1.8f;
+        float pulse = 1.0f + 0.22f * (float)Math.Sin(elapsed * 7.0);
         World.DrawMarker(
             MarkerType.DebugSphere,
             _blackHoleCenter,
             Vector3.Zero,
             Vector3.Zero,
-            new Vector3(1.6f, 1.6f, 1.6f) * growth * pulse,
-            Color.FromArgb(235, 8, 6, 14));
+            new Vector3(2.6f, 2.6f, 2.6f) * growth * pulse,
+            Color.FromArgb(245, 8, 6, 14));
 
         // La succion se hace mas fuerte con el tiempo, para que se sienta
         // que el agujero "crece" y cada vez es mas dificil escapar de el.
-        float pullStrength = 6f + (float)elapsed * 1.5f;
+        // Base y crecimiento mas altos que antes: ahora pega fuerte desde
+        // el primer segundo, no de a poco.
+        float pullStrength = 14f + (float)elapsed * 3f;
 
         PullEntityToward(player, pullStrength);
         if (player.Position.DistanceTo(_blackHoleCenter) < BlackHoleKillRadius)
@@ -697,8 +698,10 @@ public class FiskLiveGTA : Script
         Vector3 center = _blackHoleCenter;
 
         // Explosion grande en el centro: todo lo que quedo atrapado cerca
-        // sale disparado, como si el colapso lo escupiera.
-        Function.Call(Hash.ADD_EXPLOSION, center.X, center.Y, center.Z, 2, 2.2f, true, false, 1.0f);
+        // sale disparado, como si el colapso lo escupiera. Subida de
+        // escala (2.2 -> 4.5) para que se sienta como el final de algo
+        // realmente potente, no una explosion mas.
+        Function.Call(Hash.ADD_EXPLOSION, center.X, center.Y, center.Z, 2, 4.5f, true, false, 1.0f);
 
         GTA.UI.Notification.PostTicker("~p~El agujero negro colapsó~w~", false);
         _blackHoleActive = false;
@@ -827,6 +830,19 @@ public class FiskLiveGTA : Script
                 Function.Call(Hash.FREEZE_ENTITY_POSITION, ball.Handle, false);
                 Function.Call(Hash.SET_ENTITY_COLLISION, ball.Handle, true, true);
                 Function.Call(Hash.SET_ENTITY_AS_MISSION_ENTITY, ball.Handle, true, true);
+
+                // La pelota puede caer casi encima del jugador (offset de
+                // hasta 8 unidades). Si al activar la fisica nativa queda
+                // solapada con el colisionador del jugador, el motor la
+                // empuja hacia arriba tratando de resolver esa
+                // superposicion, y eso es lo que la deja flotando a la
+                // altura del cuerpo/cabeza en vez de tocar el piso. Como
+                // el "golpe" al jugador ya lo simulamos a mano (ragdoll +
+                // dano, unas lineas mas abajo en UpdateFallingBalls), no
+                // hace falta que la fisica de la pelota choque contra el
+                // jugador para nada.
+                Function.Call(Hash.SET_ENTITY_NO_COLLISION_ENTITY, ball.Handle, player.Handle, true);
+
                 _fallingBalls.Add((ball, 0f, DateTime.Now, false, false, landingZ));
             }
         }
@@ -949,19 +965,17 @@ public class FiskLiveGTA : Script
         // un marcador dibujado + fuerzas), asi que alcanza con apagarlo.
         _blackHoleActive = false;
 
-        // Si hay un apocalipsis o una niebla en curso, los dejamos seguir
-        // su propio reloj: no cancelamos sus pulsos pendientes ni tocamos
-        // clima/busqueda, para que no se corten en seco solo porque el
-        // jugador murio en el desafio del Monte Chiliad.
-        if (!_apocalypseActive && !_blindingFogActive)
-        {
-            _scheduledActions.Clear();
-            Function.Call(Hash.SET_WEATHER_TYPE_NOW_PERSIST, "CLEAR");
-            Function.Call(Hash.SET_PLAYER_WANTED_LEVEL, Game.Player, 0, false);
-            Function.Call(Hash.SET_PLAYER_WANTED_LEVEL_NOW, Game.Player, false);
-        }
+        // Cancelamos tambien cualquier efecto pendiente (pulsos de
+        // apocalipsis, fin de neblina, etc) para que no sigan disparando
+        // despues de la limpieza.
+        _scheduledActions.Clear();
 
-        GTA.UI.Notification.PostTicker("~b~Se limpio el caos~w~", false);
+        Function.Call(Hash.SET_WEATHER_TYPE_NOW_PERSIST, "CLEAR");
+        Function.Call(Hash.SET_PLAYER_WANTED_LEVEL, Game.Player, 0, false);
+        Function.Call(Hash.SET_PLAYER_WANTED_LEVEL_NOW, Game.Player, false);
+        _blindingFogActive = false;
+
+        GTA.UI.Notification.PostTicker("~b~Se limpio todo el caos~w~", false);
     }
 
     // Mueve las pelotas gigantes hacia abajo a mano, simulando gravedad,
@@ -985,27 +999,23 @@ public class FiskLiveGTA : Script
             bool hitPlayer = entry.hitPlayer;
             float velocityZ = entry.velocityZ;
 
+            // Reafirmamos esto cada frame: en algunas versiones del juego
+            // SET_ENTITY_NO_COLLISION_ENTITY solo dura "este frame" y hay
+            // que repetirlo para que se mantenga durante toda la caida.
+            Function.Call(Hash.SET_ENTITY_NO_COLLISION_ENTITY, entry.prop.Handle, player.Handle, true);
+
             if (!landed)
             {
                 velocityZ -= 20f * Game.LastFrameTime; // gravedad simulada
                 Vector3 pos = entry.prop.Position;
                 float newZ = pos.Z + velocityZ * Game.LastFrameTime;
 
-                // Medimos el piso real en la posicion X/Y de ESTA pelota
-                // puntual (mas preciso que usar la altura del jugador para
-                // todas). Si el resultado da algo raro (mucho mas alto que
-                // el jugador, senal de que pego en un cable/poste en vez
-                // del piso de verdad), usamos landingZ como respaldo.
-                OutputArgument groundZArg = new OutputArgument();
-                Function.Call<bool>(Hash.GET_GROUND_Z_FOR_3D_COORD, pos.X, pos.Y, pos.Z, groundZArg, false);
-                float groundZ = groundZArg.GetResult<float>();
-
-                bool groundLooksValid = groundZ > 0f && Math.Abs(groundZ - entry.landingZ) < 15f;
-                float effectiveFloor = groundLooksValid ? groundZ : entry.landingZ;
-
-                if (newZ <= effectiveFloor + 1.0f)
+                // Usamos landingZ (piso real, tomado del jugador al spawnear)
+                // en vez de volver a sondear el piso bajo la pelota: eso era
+                // lo que las dejaba colgadas arriba de postes/cercos.
+                if (newZ <= entry.landingZ + 1.0f)
                 {
-                    newZ = effectiveFloor + 1.0f; // apoyada sobre el piso, sin incrustarse
+                    newZ = entry.landingZ + 1.0f; // apoyada sobre el piso, sin incrustarse
                     landed = true;
 
                     // Ahora que ya no esta peleando contra la gravedad,
@@ -1116,7 +1126,6 @@ public class FiskLiveGTA : Script
     // + enemigos cada 4 segundos. Al terminar, todo vuelve a la normalidad.
     private void TriggerApocalypse(int seconds)
     {
-        _apocalypseActive = true;
         Function.Call(Hash.SET_WEATHER_TYPE_NOW_PERSIST, "THUNDER");
         Function.Call(Hash.SET_PLAYER_WANTED_LEVEL, Game.Player, 5, false);
         Function.Call(Hash.SET_PLAYER_WANTED_LEVEL_NOW, Game.Player, false);
@@ -1135,7 +1144,6 @@ public class FiskLiveGTA : Script
 
         ScheduleIn(seconds, () =>
         {
-            _apocalypseActive = false;
             Function.Call(Hash.SET_WEATHER_TYPE_NOW_PERSIST, "CLEAR");
             Function.Call(Hash.SET_PLAYER_WANTED_LEVEL, Game.Player, 0, false);
             Function.Call(Hash.SET_PLAYER_WANTED_LEVEL_NOW, Game.Player, false);
@@ -1190,11 +1198,14 @@ public class FiskLiveGTA : Script
                 // encima de la tarea de combate que le mandamos.
                 Function.Call(Hash.SET_ENTITY_AS_MISSION_ENTITY, monkey, true, true);
 
-                // Le damos un arma cuerpo a cuerpo. Sin arma, la IA de
-                // combate de un animal a veces no completa bien la
-                // animacion de ataque.
-                WeaponHash[] monkeyWeapons = { WeaponHash.Knife, WeaponHash.Hatchet };
-                monkey.Weapons.Give(monkeyWeapons[rnd.Next(monkeyWeapons.Length)], 1, true, true);
+                // OJO: NO le damos arma (cuchillo/hacha). a_c_chimp es un
+                // ped de tipo animal, sin el esqueleto de manos/agarre que
+                // tienen los humanos. Darle un arma que no puede sostener
+                // bien confunde la resolucion de la animacion de combate,
+                // y el juego cae de nuevo al comportamiento por defecto
+                // del animal (huir) - que es exactamente lo que paso aca.
+                // Si en algun momento se quiere reintentar esto, hay que
+                // probarlo aparte, no asumir que es una mejora inofensiva.
 
                 Function.Call(Hash.SET_PED_AS_ENEMY, monkey, true);
                 Function.Call(Hash.TASK_COMBAT_PED, monkey, player, 0, 16);
