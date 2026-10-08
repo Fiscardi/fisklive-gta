@@ -1096,20 +1096,16 @@ public class FiskLiveGTA : Script
             return;
         }
 
+        // Solo usamos SET_VEHICLE_TYRE_BURST, que ya esta probado en este
+        // mod (lo usa tambien "El vehiculo se desarma"). Arrancar la rueda
+        // entera necesita un nativo que esta version de GTA no tiene, y
+        // Script Hook V cierra el juego si se llama uno que no existe.
         for (int i = 0; i < 6; i++)
         {
-            // Primero se pincha (nativo conocido, seguro)...
             Function.Call(Hash.SET_VEHICLE_TYRE_BURST, veh, i, true, 1000f);
-            // ...y despues se intenta arrancar la rueda entera (BREAK_OFF_VEHICLE_WHEEL,
-            // por hash directo para no depender de que el nombre exista en tu version).
-            try
-            {
-                Function.Call((Hash)0xA274CADB18A5B96CUL, veh, i, true, true, true, false);
-            }
-            catch { /* si no existe en esta version, queda al menos el pinchazo */ }
         }
 
-        GTA.UI.Notification.PostTicker("~r~¡Te sacaron las ruedas!~w~", false);
+        GTA.UI.Notification.PostTicker("~r~¡Te reventaron todas las ruedas!~w~", false);
     }
 
     private void Disarm(string target)
