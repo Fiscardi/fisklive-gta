@@ -59,6 +59,26 @@ public class FiskLiveGTA : Script
     private const float BlackHolePullRadius = 45f;
     private const float BlackHoleKillRadius = 2.8f;
 
+    // ---- Caida libre sin paracaidas ----
+    private bool _freeFallActive;
+    private bool _freeFallMercy;
+    private bool _freeFallMercyUsed;
+    private DateTime _freeFallStartedAt;
+
+    // ---- Terremoto ----
+    private bool _quakeActive;
+    private DateTime _quakeEndsAt;
+    private DateTime _quakeNextPulse;
+
+    // ---- Tornado ----
+    private bool _tornadoActive;
+    private Vector3 _tornadoCenter;
+    private DateTime _tornadoStartedAt;
+    private float _tornadoDurationSeconds;
+    private const float TornadoRadius = 38f;
+
+    private readonly Random _fxRandom = new Random();
+
     // Sistema generico de "hace esto dentro de X segundos" - lo usamos para
     // que efectos como la neblina o el apocalipsis se reviertan solos.
     private List<(DateTime fireAt, Action action)> _scheduledActions = new List<(DateTime, Action)>();
@@ -223,6 +243,36 @@ public class FiskLiveGTA : Script
             }
         }
 
+        if (_freeFallActive)
+        {
+            try { UpdateFreeFall(); }
+            catch (Exception ex)
+            {
+                GTA.UI.Notification.PostTicker("~r~Error en caida libre:~w~ " + ex.Message, false);
+                _freeFallActive = false;
+            }
+        }
+
+        if (_quakeActive)
+        {
+            try { UpdateEarthquake(); }
+            catch (Exception ex)
+            {
+                GTA.UI.Notification.PostTicker("~r~Error en terremoto:~w~ " + ex.Message, false);
+                StopEarthquake();
+            }
+        }
+
+        if (_tornadoActive)
+        {
+            try { UpdateTornado(); }
+            catch (Exception ex)
+            {
+                GTA.UI.Notification.PostTicker("~r~Error en tornado:~w~ " + ex.Message, false);
+                _tornadoActive = false;
+            }
+        }
+
         if (_activeRainCars.Count > 0)
         {
             CleanupRainCars();
@@ -304,6 +354,34 @@ public class FiskLiveGTA : Script
 
             case "black_hole":
                 StartBlackHole(ExtractInt(json, "seconds", 8));
+                break;
+
+            case "bazooka_thug":
+                SpawnBazookaThugs(ExtractInt(json, "count", 1));
+                break;
+
+            case "free_fall":
+                StartFreeFall(ExtractInt(json, "mercy", 0) == 1);
+                break;
+
+            case "earthquake":
+                StartEarthquake(ExtractInt(json, "seconds", 12));
+                break;
+
+            case "tornado":
+                StartTornado(ExtractInt(json, "seconds", 20));
+                break;
+
+            case "delete_vehicle":
+                DeleteVehicle(ExtractInt(json, "radius", 0));
+                break;
+
+            case "remove_wheels":
+                RemoveWheels();
+                break;
+
+            case "disarm":
+                Disarm(ExtractValue(json, "target") ?? "player");
                 break;
 
             case "car_rain":
@@ -707,6 +785,354 @@ public class FiskLiveGTA : Script
         _blackHoleActive = false;
     }
 
+
+    // ---------- Matón con bazooka ----------
+
+    private void SpawnBazookaThugs(int count)
+    {
+        Ped player = Game.Player.Character;
+        int spawned = 0;
+
+        for (int i = 0; i < count; i++)
+        {
+            Model model = new Model("g_m_y_ballasout_01");
+            model.Request(500);
+            if (!model.IsLoaded) continue;
+
+            // Aparece lejos (18-26 m) y en cualquier direccion: con el
+            // bazooka necesita distancia para apuntar y no matarse solo.
+            double angle = _fxRandom.NextDouble() * Math.PI * 2.0;
+            float dist = 18f + (float)_fxRandom.NextDouble() * 8f;
+            Vector3 pos = player.Position + new Vector3((float)Math.Cos(angle) * dist, (float)Math.Sin(angle) * dist, 0f);
+
+            Ped thug = World.CreatePed(model, pos);
+            if (thug != null)
+            {
+                // Pocas balas a proposito (3 cohetes) y punteria media:
+                // asusta y puede lastimar, pero no es una condena segura.
+                thug.Weapons.Give(WeaponHash.RPG, 3, true, true);
+                thug.Weapons.Select(WeaponHash.RPG, true);
+                thug.Health = thug.MaxHealth;
+                Function.Call(Hash.SET_PED_ACCURACY, thug, 35);
+                Function.Call(Hash.SET_PED_FLEE_ATTRIBUTES, thug, 0, false);
+                Function.Call(Hash.SET_PED_COMBAT_ATTRIBUTES, thug, 46, true);
+                Function.Call(Hash.SET_PED_AS_ENEMY, thug, true);
+                Function.Call(Hash.TASK_COMBAT_PED, thug, player, 0, 16);
+                _activeHostilePeds.Add(thug);
+                spawned++;
+            }
+            model.MarkAsNoLongerNeeded();
+        }
+
+        if (spawned > 0)
+            GTA.UI.Notification.PostTicker("~r~¡Un matón con bazooka te encontró!~w~", false);
+    }
+
+    // ---------- Caida libre sin paracaidas ----------
+
+    private void StartFreeFall(bool mercy)
+    {
+        if (_freeFallActive) return;
+
+        Ped player = Game.Player.Character;
+
+        // Si esta en un vehiculo, lo sacamos de ahi antes de subirlo.
+        Function.Call(Hash.CLEAR_PED_TASKS_IMMEDIATELY, player);
+
+        Vector3 p = player.Position;
+        player.Position = new Vector3(p.X, p.Y, p.Z + 900f);
+        if (player.Weapons.HasWeapon(WeaponHash.Parachute)) player.Weapons.Remove(WeaponHash.Parachute);
+        Function.Call(Hash.TASK_SKY_DIVE, player, true);
+
+        _freeFallActive = true;
+        _freeFallMercy = mercy;
+        _freeFallMercyUsed = false;
+        _freeFallStartedAt = DateTime.Now;
+
+        GTA.UI.Notification.PostTicker(mercy
+            ? "~o~¡Caída libre! ~w~(el paracaídas aparece cerca del piso)"
+            : "~r~¡Caída libre SIN paracaídas!~w~", false);
+    }
+
+    private void UpdateFreeFall()
+    {
+        Ped player = Game.Player.Character;
+        double elapsed = (DateTime.Now - _freeFallStartedAt).TotalSeconds;
+
+        if (player.IsDead || elapsed > 75 || (elapsed > 4 && player.HeightAboveGround < 2f))
+        {
+            _freeFallActive = false;
+            return;
+        }
+
+        if (!_freeFallMercyUsed)
+        {
+            // El juego puede volver a darle el paracaidas: lo sacamos cada tick.
+            if (player.Weapons.HasWeapon(WeaponHash.Parachute)) player.Weapons.Remove(WeaponHash.Parachute);
+
+            if (_freeFallMercy && elapsed > 5 && player.HeightAboveGround < 180f)
+            {
+                player.Weapons.Give(WeaponHash.Parachute, 1, true, true);
+                Function.Call(Hash.FORCE_PED_TO_OPEN_PARACHUTE, player);
+                _freeFallMercyUsed = true;
+                GTA.UI.Notification.PostTicker("~g~¡Se abrió el paracaídas!~w~", false);
+            }
+        }
+    }
+
+    // ---------- Terremoto ----------
+
+    private void StartEarthquake(int seconds)
+    {
+        if (_quakeActive)
+        {
+            GTA.UI.Notification.PostTicker("~y~Ya hay un terremoto en curso~w~", false);
+            return;
+        }
+
+        _quakeActive = true;
+        _quakeEndsAt = DateTime.Now.AddSeconds(Math.Max(4, seconds));
+        _quakeNextPulse = DateTime.Now;
+        Function.Call(Hash.SHAKE_GAMEPLAY_CAM, "ROAD_VIBRATION_SHAKE", 1.6f);
+
+        GTA.UI.Notification.PostTicker("~r~¡TERREMOTO!~w~", false);
+    }
+
+    private void StopEarthquake()
+    {
+        _quakeActive = false;
+        Function.Call(Hash.STOP_GAMEPLAY_CAM_SHAKING, true);
+    }
+
+    private void UpdateEarthquake()
+    {
+        if (DateTime.Now >= _quakeEndsAt)
+        {
+            StopEarthquake();
+            GTA.UI.Notification.PostTicker("~g~El terremoto terminó~w~", false);
+            return;
+        }
+
+        if (DateTime.Now < _quakeNextPulse) return;
+        _quakeNextPulse = DateTime.Now.AddMilliseconds(450);
+
+        Ped player = Game.Player.Character;
+
+        // Los autos pegan saltos para cualquier lado.
+        foreach (Vehicle v in World.GetNearbyVehicles(player.Position, 60f))
+        {
+            if (v == null || !v.Exists()) continue;
+            float fx = ((float)_fxRandom.NextDouble() - 0.5f) * 5f;
+            float fy = ((float)_fxRandom.NextDouble() - 0.5f) * 5f;
+            float fz = 3f + (float)_fxRandom.NextDouble() * 4f;
+            Function.Call(Hash.APPLY_FORCE_TO_ENTITY, v.Handle, 1, fx, fy, fz,
+                0f, 0f, 0f, 0, false, true, true, false, true);
+        }
+
+        // La gente se cae al piso.
+        foreach (Ped ped in World.GetNearbyPeds(player.Position, 50f))
+        {
+            if (ped == null || !ped.Exists() || ped == player || ped.IsInVehicle()) continue;
+            Function.Call(Hash.SET_PED_TO_RAGDOLL, ped, 1500, 1500, 0, 1, 1, 0);
+        }
+
+        // Y el jugador tropieza de vez en cuando (no en cada pulso, asi puede pararse).
+        if (!player.IsInVehicle() && _fxRandom.NextDouble() < 0.15)
+        {
+            Function.Call(Hash.SET_PED_TO_RAGDOLL, player, 1200, 1200, 0, 1, 1, 0);
+        }
+    }
+
+    // ---------- Tornado ----------
+
+    private float GroundZ(float x, float y, float refZ)
+    {
+        float g = World.GetGroundHeight(new Vector3(x, y, refZ + 100f));
+        return g > -50f ? g : refZ - 1f;
+    }
+
+    private void StartTornado(int seconds)
+    {
+        if (_tornadoActive)
+        {
+            GTA.UI.Notification.PostTicker("~y~Ya hay un tornado activo~w~", false);
+            return;
+        }
+
+        Ped player = Game.Player.Character;
+        double angle = _fxRandom.NextDouble() * Math.PI * 2.0;
+        float x = player.Position.X + (float)Math.Cos(angle) * 40f;
+        float y = player.Position.Y + (float)Math.Sin(angle) * 40f;
+
+        _tornadoCenter = new Vector3(x, y, GroundZ(x, y, player.Position.Z));
+        _tornadoStartedAt = DateTime.Now;
+        _tornadoDurationSeconds = Math.Max(6, seconds);
+        _tornadoActive = true;
+
+        GTA.UI.Notification.PostTicker("~r~¡TORNADO!~w~ Viene hacia vos.", false);
+    }
+
+    private void UpdateTornado()
+    {
+        double elapsed = (DateTime.Now - _tornadoStartedAt).TotalSeconds;
+        if (elapsed >= _tornadoDurationSeconds)
+        {
+            _tornadoActive = false;
+            GTA.UI.Notification.PostTicker("~g~El tornado se disipó~w~", false);
+            return;
+        }
+
+        Ped player = Game.Player.Character;
+        float dt = Game.LastFrameTime;
+
+        // Se mueve lento hacia el jugador (3.5 m/s): se puede escapar corriendo
+        // en auto, pero a pie es dificil.
+        Vector3 toPlayer = player.Position - _tornadoCenter;
+        toPlayer.Z = 0f;
+        float flat = toPlayer.Length();
+        if (flat > 1f)
+        {
+            Vector3 step = toPlayer / flat * 3.5f * dt;
+            float nx = _tornadoCenter.X + step.X;
+            float ny = _tornadoCenter.Y + step.Y;
+            _tornadoCenter = new Vector3(nx, ny, GroundZ(nx, ny, player.Position.Z));
+        }
+
+        // Visual: capas de cilindros grises que se ensanchan con la altura
+        // y giran un poco, para dar forma de embudo.
+        for (int i = 0; i < 7; i++)
+        {
+            float h = i * 8f;
+            float diameter = 6f + i * 4.5f;
+            float swirl = (float)(elapsed * 3.0 + i * 0.7);
+            Vector3 pos = _tornadoCenter + new Vector3((float)Math.Cos(swirl) * i * 0.9f, (float)Math.Sin(swirl) * i * 0.9f, h + 4f);
+            World.DrawMarker(MarkerType.VerticalCylinder, pos, Vector3.Zero, Vector3.Zero,
+                new Vector3(diameter, diameter, 9f), Color.FromArgb(110, 95, 95, 100));
+        }
+
+        // Fuerzas: giran alrededor, se acercan al centro y suben.
+        if (!player.IsInVehicle()) ApplyTornadoForce(player, true);
+
+        foreach (Vehicle v in World.GetNearbyVehicles(_tornadoCenter, TornadoRadius))
+        {
+            if (v == null || !v.Exists()) continue;
+            ApplyTornadoForce(v, false);
+        }
+
+        foreach (Ped ped in World.GetNearbyPeds(_tornadoCenter, TornadoRadius))
+        {
+            if (ped == null || !ped.Exists() || ped == player || ped.IsInVehicle()) continue;
+            ApplyTornadoForce(ped, true);
+        }
+    }
+
+    private void ApplyTornadoForce(Entity entity, bool ragdollIfPed)
+    {
+        Vector3 toCenter = _tornadoCenter - entity.Position;
+        toCenter.Z = 0f;
+        float dist = toCenter.Length();
+        if (dist < 0.5f || dist > TornadoRadius) return;
+
+        float f = 1f - dist / TornadoRadius;   // 0 afuera .. 1 en el centro
+        Vector3 inward = toCenter / dist;
+        Vector3 tangent = new Vector3(-inward.Y, inward.X, 0f);
+
+        if (ragdollIfPed && f > 0.25f)
+        {
+            Function.Call(Hash.SET_PED_TO_RAGDOLL, entity.Handle, 1500, 1500, 0, 1, 1, 0);
+        }
+
+        float fx = tangent.X * 22f * f + inward.X * 9f * f;
+        float fy = tangent.Y * 22f * f + inward.Y * 9f * f;
+        float fz = 4f + 16f * f;
+
+        Function.Call(Hash.APPLY_FORCE_TO_ENTITY, entity.Handle, 3, fx, fy, fz,
+            0f, 0f, 0f, 0, false, true, true, false, true);
+    }
+
+    // ---------- Borrar vehiculo / sacar ruedas / desarmar ----------
+
+    private Vehicle FindTargetVehicle()
+    {
+        Ped player = Game.Player.Character;
+        if (player.IsInVehicle()) return player.CurrentVehicle;
+        return World.GetClosestVehicle(player.Position, 25f);
+    }
+
+    private void DeleteVehicle(int radius)
+    {
+        Ped player = Game.Player.Character;
+
+        if (radius > 0)
+        {
+            int n = 0;
+            foreach (Vehicle v in World.GetNearbyVehicles(player.Position, radius))
+            {
+                if (v == null || !v.Exists()) continue;
+                v.Delete();
+                n++;
+            }
+            GTA.UI.Notification.PostTicker("~r~Se borraron " + n + " vehículos~w~", false);
+            return;
+        }
+
+        Vehicle target = FindTargetVehicle();
+        if (target == null || !target.Exists())
+        {
+            GTA.UI.Notification.PostTicker("~y~No hay ningún vehículo cerca para borrar~w~", false);
+            return;
+        }
+
+        target.Delete();
+        GTA.UI.Notification.PostTicker("~r~¡Tu vehículo desapareció!~w~", false);
+    }
+
+    private void RemoveWheels()
+    {
+        Vehicle veh = FindTargetVehicle();
+        if (veh == null || !veh.Exists())
+        {
+            GTA.UI.Notification.PostTicker("~y~No hay ningún vehículo cerca~w~", false);
+            return;
+        }
+
+        for (int i = 0; i < 6; i++)
+        {
+            // Primero se pincha (nativo conocido, seguro)...
+            Function.Call(Hash.SET_VEHICLE_TYRE_BURST, veh, i, true, 1000f);
+            // ...y despues se intenta arrancar la rueda entera (BREAK_OFF_VEHICLE_WHEEL,
+            // por hash directo para no depender de que el nombre exista en tu version).
+            try
+            {
+                Function.Call((Hash)0xA274CADB18A5B96CUL, veh, i, true, true, true, false);
+            }
+            catch { /* si no existe en esta version, queda al menos el pinchazo */ }
+        }
+
+        GTA.UI.Notification.PostTicker("~r~¡Te sacaron las ruedas!~w~", false);
+    }
+
+    private void Disarm(string target)
+    {
+        Ped player = Game.Player.Character;
+
+        if (string.Equals(target, "enemies", StringComparison.OrdinalIgnoreCase))
+        {
+            int n = 0;
+            foreach (Ped ped in World.GetNearbyPeds(player.Position, 80f))
+            {
+                if (ped == null || !ped.Exists() || ped == player || !ped.IsAlive) continue;
+                ped.Weapons.RemoveAll();
+                n++;
+            }
+            GTA.UI.Notification.PostTicker("~g~Desarmaste a " + n + " personas~w~", false);
+            return;
+        }
+
+        player.Weapons.RemoveAll();
+        GTA.UI.Notification.PostTicker("~r~¡Te quitaron todas las armas!~w~", false);
+    }
+
     private void TeleportRandom()
     {
         Random rnd = new Random();
@@ -942,6 +1368,11 @@ public class FiskLiveGTA : Script
         // para que UpdateKillerMonkeys no siga iterando sobre entidades
         // muertas.
         _activeKillerMonkeys.Clear();
+
+        // Efectos nuevos: se apagan tambien al limpiar todo.
+        _freeFallActive = false;
+        _tornadoActive = false;
+        if (_quakeActive) StopEarthquake();
 
         foreach (var entry in _activeBoulders)
         {
