@@ -84,6 +84,11 @@ public class FiskLiveGTA : Script
     private List<(DateTime fireAt, Action action)> _scheduledActions = new List<(DateTime, Action)>();
     private bool _blindingFogActive;
 
+    // Apocalipsis: hasta cuando dura, para que sobreviva a la muerte del
+    // jugador (y a la limpieza automatica del desafio del Chiliad).
+    private DateTime _apocalypseEndsAt = DateTime.MinValue;
+    private bool _apocalypseWasDead;
+
     private void ScheduleIn(float seconds, Action action)
     {
         _scheduledActions.Add((DateTime.Now.AddSeconds(seconds), action));
@@ -281,6 +286,11 @@ public class FiskLiveGTA : Script
         if (_scheduledActions.Count > 0)
         {
             ProcessScheduledActions();
+        }
+
+        if (DateTime.Now < _apocalypseEndsAt)
+        {
+            UpdateApocalypseRespawn();
         }
 
         if (_blindingFogActive)
@@ -1392,14 +1402,16 @@ public class FiskLiveGTA : Script
         // un marcador dibujado + fuerzas), asi que alcanza con apagarlo.
         _blackHoleActive = false;
 
-        // Cancelamos tambien cualquier efecto pendiente (pulsos de
-        // apocalipsis, fin de neblina, etc) para que no sigan disparando
-        // despues de la limpieza.
-        _scheduledActions.Clear();
-
-        Function.Call(Hash.SET_WEATHER_TYPE_NOW_PERSIST, "CLEAR");
-        Function.Call(Hash.SET_PLAYER_WANTED_LEVEL, Game.Player, 0, false);
-        Function.Call(Hash.SET_PLAYER_WANTED_LEVEL_NOW, Game.Player, false);
+        // OJO: ya NO cancelamos las acciones programadas (_scheduledActions)
+        // ni reseteamos clima/busqueda si hay un apocalipsis en curso: si el
+        // jugador muere, el apocalipsis tiene que seguir con el tiempo que
+        // le quedaba (antes la limpieza del Chiliad lo cortaba al morir).
+        if (DateTime.Now >= _apocalypseEndsAt)
+        {
+            Function.Call(Hash.SET_WEATHER_TYPE_NOW_PERSIST, "CLEAR");
+            Function.Call(Hash.SET_PLAYER_WANTED_LEVEL, Game.Player, 0, false);
+            Function.Call(Hash.SET_PLAYER_WANTED_LEVEL_NOW, Game.Player, false);
+        }
         _blindingFogActive = false;
 
         GTA.UI.Notification.PostTicker("~b~Se limpio todo el caos~w~", false);
@@ -1551,8 +1563,30 @@ public class FiskLiveGTA : Script
 
     // Combo de caos por X segundos: tormenta, busqueda maxima, y explosiones
     // + enemigos cada 4 segundos. Al terminar, todo vuelve a la normalidad.
+    // Cuando el jugador revive en medio de un apocalipsis, el juego le
+    // borra la busqueda y puede cambiar el clima: los volvemos a poner y
+    // avisamos cuanto tiempo queda.
+    private void UpdateApocalypseRespawn()
+    {
+        Ped player = Game.Player.Character;
+        bool dead = player.IsDead;
+
+        if (_apocalypseWasDead && !dead)
+        {
+            Function.Call(Hash.SET_WEATHER_TYPE_NOW_PERSIST, "THUNDER");
+            Function.Call(Hash.SET_PLAYER_WANTED_LEVEL, Game.Player, 5, false);
+            Function.Call(Hash.SET_PLAYER_WANTED_LEVEL_NOW, Game.Player, false);
+            int left = (int)Math.Ceiling((_apocalypseEndsAt - DateTime.Now).TotalSeconds);
+            GTA.UI.Notification.PostTicker("~r~El apocalipsis sigue~w~: quedan " + left + " segundos", false);
+        }
+
+        _apocalypseWasDead = dead;
+    }
+
     private void TriggerApocalypse(int seconds)
     {
+        _apocalypseEndsAt = DateTime.Now.AddSeconds(seconds);
+        _apocalypseWasDead = false;
         Function.Call(Hash.SET_WEATHER_TYPE_NOW_PERSIST, "THUNDER");
         Function.Call(Hash.SET_PLAYER_WANTED_LEVEL, Game.Player, 5, false);
         Function.Call(Hash.SET_PLAYER_WANTED_LEVEL_NOW, Game.Player, false);
